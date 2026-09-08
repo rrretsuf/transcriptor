@@ -38,6 +38,8 @@ function loadConfig() {
     config = { ...DEFAULTS, ...rest };
     if (apiKeyEnc && safeStorage.isEncryptionAvailable()) {
       config.apiKey = safeStorage.decryptString(Buffer.from(apiKeyEnc, "base64"));
+    } else if (raw.apiKey && safeStorage.isEncryptionAvailable()) {
+      saveConfig();
     }
   } catch {
     config = { ...DEFAULTS };
@@ -123,7 +125,7 @@ function openSettings() {
   }
   settingsWin = new BrowserWindow({
     width: 620,
-    height: 760,
+    height: 820,
     minWidth: 560,
     minHeight: 560,
     title: "Soniox Flow",

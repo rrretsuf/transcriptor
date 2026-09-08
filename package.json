@@ -8,7 +8,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac",
+    "dist": "electron-builder --mac && codesign --force --deep --sign - \"dist/mac-arm64/Soniox Flow.app\"",
     "icons": "python3 scripts/make-icons.py"
   },
   "devDependencies": {
@@ -18,15 +18,28 @@
   "build": {
     "appId": "com.sonioxflow.app",
     "productName": "Soniox Flow",
-    "files": ["main.js", "preload.js", "renderer/**", "assets/**"],
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "assets/**"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns",
-      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "extendInfo": {
         "LSUIElement": true,
         "NSMicrophoneUsageDescription": "Soniox Flow needs the microphone to transcribe your speech."
-      }
+      },
+      "identity": null
     }
   }
 }

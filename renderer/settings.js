@@ -7,6 +7,10 @@ const LANGUAGES = {
   ja: "Japanese", ko: "Korean", sv: "Swedish", da: "Danish", fi: "Finnish", no: "Norwegian",
 };
 
+const KEY_SYMBOLS = { Command: "\u2318", Control: "\u2303", Alt: "\u2325", Shift: "\u21e7" };
+const pretty = (accelerator) =>
+  accelerator.split("+").map((part) => KEY_SYMBOLS[part] ?? part).join("");
+
 const $ = (id) => document.getElementById(id);
 const savedEl = $("saved");
 let config = null;
@@ -83,7 +87,7 @@ function bindHotkey() {
   const field = $("hotkey");
   const stop = () => {
     field.classList.remove("capturing");
-    field.value = config.hotkey;
+    field.value = pretty(config.hotkey);
     field.blur();
   };
   field.onclick = () => {
@@ -99,7 +103,7 @@ function bindHotkey() {
     const combo = accelerator(event);
     if (!combo) return;
     save({ hotkey: combo });
-    $("hotkeyEcho").textContent = combo;
+    $("hotkeyEcho").textContent = pretty(combo);
     stop();
   };
 }
@@ -171,8 +175,8 @@ async function verifyKey() {
   $("model").value = config.model;
   $("translateTo").value = config.translateTo || "";
   $("context").value = config.context || "";
-  $("hotkey").value = config.hotkey;
-  $("hotkeyEcho").textContent = config.hotkey;
+  $("hotkey").value = pretty(config.hotkey);
+  $("hotkeyEcho").textContent = pretty(config.hotkey);
   $("silenceStopMs").value = String(config.silenceStopMs);
   $("autoPaste").checked = config.autoPaste;
   $("restoreClipboard").checked = config.restoreClipboard;
