@@ -1,6 +1,6 @@
 const {
   app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, ipcMain,
-  safeStorage, screen, shell, nativeImage, systemPreferences, Notification,
+  safeStorage, screen, shell, nativeImage, systemPreferences, Notification, session,
 } = require("electron");
 const { execFile } = require("node:child_process");
 const fs = require("node:fs");
@@ -188,7 +188,7 @@ function notify(title, body) {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
 }
 
-function toggle() {
+async function toggle() {
   if (state === "recording") return stop();
   if (state !== "idle") return;
 
@@ -196,6 +196,13 @@ function toggle() {
     notify("Soniox Flow", "Add your Soniox API key in Settings first.");
     openSettings();
     return;
+  }
+  if (IS_MAC && systemPreferences.getMediaAccessStatus("microphone") !== "granted") {
+    if (!(await systemPreferences.askForMediaAccess("microphone"))) {
+      notify("Microphone blocked", "Allow microphone access to dictate.");
+      openSettings();
+      return;
+    }
   }
   setState("recording");
   placePill();
@@ -314,6 +321,12 @@ if (!app.requestSingleInstanceLock()) app.quit();
 app.whenReady().then(() => {
   if (IS_MAC) app.dock?.hide();
   loadConfig();
+
+  // The pill is the only page allowed to reach hardware; nothing else is granted.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
+    callback(permission === "media" && contents === pill?.webContents);
+  });
+
   createPill();
 
   tray = new Tray(trayIcon(false));
