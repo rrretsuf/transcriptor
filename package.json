@@ -1,0 +1,32 @@
+{
+  "name": "soniox-flow",
+  "productName": "Soniox Flow",
+  "version": "1.0.0",
+  "description": "Instant voice dictation for macOS, powered by Soniox real-time speech-to-text.",
+  "license": "MIT",
+  "author": "Filip Kustec",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac",
+    "icons": "python3 scripts/make-icons.py"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.sonioxflow.app",
+    "productName": "Soniox Flow",
+    "files": ["main.js", "preload.js", "renderer/**", "assets/**"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSMicrophoneUsageDescription": "Soniox Flow needs the microphone to transcribe your speech."
+      }
+    }
+  }
+}

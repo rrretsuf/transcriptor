@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Soniox Flow — Settings</title>
+<link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="mark"></span>
+      <div>
+        <h1>Soniox Flow</h1>
+        <p id="saved">Voice dictation anywhere on your Mac</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Soniox</h2>
+
+      <label class="row stack">
+        <span class="label">API key</span>
+        <div class="key-row">
+          <input id="apiKey" type="password" placeholder="snx_proj_…" spellcheck="false" />
+          <button id="verify" class="ghost">Verify</button>
+        </div>
+        <p id="keyStatus" class="note">Stored encrypted in your macOS Keychain. Never leaves this Mac.</p>
+      </label>
+
+      <label class="row">
+        <span class="label">Model</span>
+        <select id="model"><option value="stt-rt-v5">stt-rt-v5</option></select>
+      </label>
+
+      <div class="row stack">
+        <span class="label">Languages</span>
+        <div id="languages" class="chips"></div>
+        <p class="note">Pick none to let Soniox detect the language automatically.</p>
+      </div>
+
+      <label class="row">
+        <span class="label">Translate to</span>
+        <select id="translateTo">
+          <option value="">Off — transcribe as spoken</option>
+          <option value="en">English</option>
+          <option value="sl">Slovenian</option>
+          <option value="de">German</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="it">Italian</option>
+        </select>
+      </label>
+
+      <label class="row stack">
+        <span class="label">Vocabulary</span>
+        <textarea id="context" rows="3" spellcheck="false"
+          placeholder="Names, jargon and product terms Soniox should get right — Kustec, Enki, Soniox, Electron"></textarea>
+        <p class="note">Boosts accuracy for words the model rarely hears.</p>
+      </label>
+    </section>
+
+    <section>
+      <h2>Dictation</h2>
+
+      <label class="row">
+        <span class="label">Hotkey</span>
+        <input id="hotkey" class="hotkey" readonly value="Command+Shift+Space" />
+      </label>
+
+      <label class="row">
+        <span class="label">Stop after silence</span>
+        <select id="silenceStopMs">
+          <option value="0">Off — I press the hotkey again</option>
+          <option value="1500">1.5 seconds</option>
+          <option value="2000">2 seconds</option>
+          <option value="3000">3 seconds</option>
+        </select>
+      </label>
+
+      <label class="row toggle">
+        <div>
+          <span class="label">Paste at cursor</span>
+          <p class="note">Types the transcript straight into the app you were using.</p>
+        </div>
+        <input id="autoPaste" type="checkbox" />
+      </label>
+
+      <label class="row toggle">
+        <div>
+          <span class="label">Restore clipboard</span>
+          <p class="note">Put your previous clipboard back after pasting.</p>
+        </div>
+        <input id="restoreClipboard" type="checkbox" />
+      </label>
+    </section>
+
+    <section>
+      <h2>System</h2>
+
+      <div class="row toggle">
+        <div>
+          <span class="label">Microphone</span>
+          <p id="micNote" class="note">Required to record your voice.</p>
+        </div>
+        <button id="micBtn" class="ghost">Grant</button>
+      </div>
+
+      <div class="row toggle">
+        <div>
+          <span class="label">Accessibility</span>
+          <p id="axNote" class="note">Required to paste at the cursor.</p>
+        </div>
+        <button id="axBtn" class="ghost">Grant</button>
+      </div>
+
+      <label class="row toggle">
+        <div>
+          <span class="label">Launch at login</span>
+          <p class="note">Soniox Flow lives in the menu bar.</p>
+        </div>
+        <input id="launchAtLogin" type="checkbox" />
+      </label>
+    </section>
+
+    <footer>
+      Press <b id="hotkeyEcho">Command+Shift+Space</b> anywhere to dictate. <b>Esc</b> cancels.
+    </footer>
+  </main>
+
+  <script src="settings.js"></script>
+</body>
+</html>
