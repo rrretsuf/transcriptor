@@ -1,6 +1,6 @@
 {
-  "name": "soniox-flow",
-  "productName": "Soniox Flow",
+  "name": "transcriber",
+  "productName": "Transcriber",
   "version": "1.0.0",
   "description": "Instant voice dictation for macOS, powered by Soniox real-time speech-to-text.",
   "license": "MIT",
@@ -8,7 +8,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac && codesign --force --deep --sign - \"dist/mac-arm64/Soniox Flow.app\"",
+    "dist": "electron-builder --mac && codesign --force --deep --sign - \"dist/mac-arm64/Transcriber.app\"",
     "icons": "python3 scripts/make-icons.py"
   },
   "devDependencies": {
@@ -16,8 +16,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.sonioxflow.app",
-    "productName": "Soniox Flow",
+    "appId": "com.transcriber.app",
+    "productName": "Transcriber",
     "files": [
       "main.js",
       "preload.js",
@@ -37,7 +37,7 @@
       ],
       "extendInfo": {
         "LSUIElement": true,
-        "NSMicrophoneUsageDescription": "Soniox Flow needs the microphone to transcribe your speech."
+        "NSMicrophoneUsageDescription": "Transcriber needs the microphone to transcribe your speech."
       },
       "identity": null
     }

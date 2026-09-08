@@ -43,11 +43,9 @@ S = 1024
 icon = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 gradient = Image.new("RGBA", (S, S))
 for y in range(S):
-    for_x = y / (S - 1)
-    gradient.paste(
-        (int(167 + (91 - 167) * for_x), int(139 + (108 - 139) * for_x), int(250 + (255 - 250) * for_x), 255),
-        (0, y, S, y + 1),
-    )
+    t = y / (S - 1)
+    shade = int(58 + (24 - 58) * t)
+    gradient.paste((shade, shade, shade + 2, 255), (0, y, S, y + 1))
 mask = Image.new("L", (S, S), 0)
 ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=int(S * 0.225), fill=255)
 icon.paste(gradient, (0, 0), mask)

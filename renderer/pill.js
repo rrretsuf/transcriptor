@@ -1,14 +1,14 @@
 const SAMPLE_RATE = 16000;
-const BAR_COUNT = 11;
 const SPEECH_RMS = 0.02;
 const SILENCE_RMS = 0.012;
 const FINISH_TIMEOUT_MS = 8000;
+const MIN_PANEL = 96;
 
-const shell = document.getElementById("shell");
-const transcriptEl = document.getElementById("transcript");
+const surface = document.getElementById("surface");
 const finalEl = document.getElementById("final");
 const partialEl = document.getElementById("partial");
-const hintEl = document.getElementById("hint");
+const scrollEl = document.getElementById("scroll");
+const messageEl = document.getElementById("message");
 const bars = [...document.querySelectorAll(".bar")];
 
 let socket = null;
@@ -20,33 +20,37 @@ let session = null;
 let finalText = "";
 let partialText = "";
 let queue = [];
+let startedAt = 0;
 let stopping = false;
 let heardSpeech = false;
 let silenceStart = 0;
 let finishTimer = null;
+let panelHeight = 180;
 
 /* ------------------------------------ ui ------------------------------------ */
 
-function setPhase(phase, hint) {
-  shell.dataset.phase = phase;
-  if (hint !== undefined) hintEl.textContent = hint;
+function setPhase(phase, message = "") {
+  surface.dataset.phase = phase;
+  messageEl.textContent = message;
 }
 
 function renderTranscript() {
   finalEl.textContent = finalText;
   partialEl.textContent = partialText;
-  transcriptEl.classList.toggle("visible", Boolean(finalText || partialText));
-  transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  surface.dataset.empty = String(!finalText && !partialText);
+  scrollEl.scrollTop = scrollEl.scrollHeight;
 }
 
 function pushLevel(rms) {
   const level = Math.min(1, Math.pow(Math.max(0, rms) * 8, 0.75));
-  for (let i = 0; i < BAR_COUNT - 1; i++) bars[i].style.height = bars[i + 1].style.height;
-  bars[BAR_COUNT - 1].style.height = `${4 + level * 24}px`;
+  for (let i = 0; i < bars.length - 1; i++) {
+    bars[i].style.setProperty("--l", bars[i + 1].style.getPropertyValue("--l") || 0);
+  }
+  bars[bars.length - 1].style.setProperty("--l", level.toFixed(3));
 }
 
 function resetBars() {
-  bars.forEach((bar) => { bar.style.height = "4px"; });
+  bars.forEach((bar) => bar.style.setProperty("--l", 0));
 }
 
 /* ---------------------------------- session --------------------------------- */
@@ -66,9 +70,7 @@ function buildConfig(cfg) {
   return message;
 }
 
-function isSpecialToken(text) {
-  return /^<[^>]+>$/.test(text);
-}
+const isSpecialToken = (text) => /^<[^>]+>$/.test(text);
 
 function keepToken(token) {
   if (isSpecialToken(token.text)) return false;
@@ -105,20 +107,21 @@ async function start(cfg) {
   stopping = false;
   heardSpeech = false;
   silenceStart = 0;
+  startedAt = performance.now();
   resetBars();
   renderTranscript();
-  setPhase("connecting", "Connecting…");
+  setPhase("connecting");
 
   try {
     socket = new WebSocket("wss://stt-rt.soniox.com/transcribe-websocket");
     socket.binaryType = "arraybuffer";
     socket.onmessage = handleMessage;
-    socket.onerror = () => fail("Could not reach Soniox.");
+    socket.onerror = () => fail("Soniox unreachable");
     socket.onopen = () => {
       socket.send(JSON.stringify(buildConfig(cfg)));
       for (const chunk of queue) socket.send(chunk);
       queue = [];
-      if (!stopping) setPhase("listening", `Listening — ${cfg.hotkeyLabel} to finish`);
+      if (!stopping) setPhase("listening");
     };
 
     stream = await navigator.mediaDevices.getUserMedia({
@@ -136,7 +139,7 @@ async function start(cfg) {
     worklet.port.onmessage = ({ data }) => onAudioChunk(data);
     audio.createMediaStreamSource(stream).connect(worklet);
   } catch (err) {
-    fail(err.name === "NotAllowedError" ? "Microphone access denied." : err.message);
+    fail(err.name === "NotAllowedError" ? "Microphone denied" : err.message);
   }
 }
 
@@ -151,7 +154,7 @@ function onAudioChunk({ pcm, rms }) {
   if (!heardSpeech || rms > SILENCE_RMS) return;
   const now = performance.now();
   if (!silenceStart) silenceStart = now;
-  else if (now - silenceStart > session.silenceStopMs) { silenceStart = 0; window.flow.autostop(); }
+  else if (now - silenceStart > session.silenceStopMs) { silenceStart = 0; window.app.autostop(); }
 }
 
 function stopCapture() {
@@ -168,7 +171,7 @@ function stop() {
   if (stopping) return;
   stopping = true;
   stopCapture();
-  setPhase("transcribing", "Transcribing…");
+  setPhase("transcribing");
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send("");
     finishTimer = setTimeout(finish, FINISH_TIMEOUT_MS);
@@ -180,21 +183,22 @@ function stop() {
 function finish() {
   clearTimeout(finishTimer);
   const text = (finalText + partialText).replace(/\s+/g, " ").trim();
+  const durationMs = Math.round(performance.now() - startedAt);
   teardown();
-  window.flow.result(text);
+  window.app.result({ text, durationMs });
 }
 
 function fail(message) {
   clearTimeout(finishTimer);
   teardown();
   setPhase("error", message);
-  window.flow.error(message);
+  window.app.error(message);
 }
 
 function cancel() {
   clearTimeout(finishTimer);
   teardown();
-  setPhase("idle", "");
+  setPhase("idle");
 }
 
 function teardown() {
@@ -210,6 +214,42 @@ function teardown() {
   stopping = true;
 }
 
-window.flow.onStart(start);
-window.flow.onStop(stop);
-window.flow.onCancel(cancel);
+/* --------------------------------- surface ---------------------------------- */
+
+document.getElementById("control").addEventListener("click", () => window.app.toggleTranscript());
+
+const grip = document.getElementById("grip");
+grip.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  grip.setPointerCapture(event.pointerId);
+  const originY = event.screenY;
+  const originHeight = panelHeight;
+  const grows = surface.dataset.position === "bottom" ? -1 : 1;
+
+  const onMove = (move) => {
+    panelHeight = Math.max(MIN_PANEL, originHeight + grows * (move.screenY - originY));
+    window.app.resizeTranscript(panelHeight);
+  };
+  const onUp = () => {
+    grip.removeEventListener("pointermove", onMove);
+    grip.removeEventListener("pointerup", onUp);
+    window.app.commitResize();
+  };
+  grip.addEventListener("pointermove", onMove);
+  grip.addEventListener("pointerup", onUp);
+});
+
+window.app.onLayout(({ position, open, height }) => {
+  surface.dataset.position = position;
+  surface.dataset.open = String(open);
+  panelHeight = height;
+});
+
+window.app.onStart((cfg) => {
+  surface.dataset.position = cfg.position;
+  surface.dataset.open = String(cfg.open);
+  panelHeight = cfg.height;
+  start(cfg);
+});
+window.app.onStop(stop);
+window.app.onCancel(cancel);

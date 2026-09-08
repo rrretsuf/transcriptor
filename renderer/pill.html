@@ -2,22 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Soniox Flow</title>
+<title>Transcriber</title>
 <link rel="stylesheet" href="pill.css" />
 </head>
 <body>
-  <div id="shell" data-phase="idle">
-    <div id="transcript">
-      <span id="final"></span><span id="partial"></span>
-    </div>
-    <div id="pill">
+  <div id="surface" data-position="bottom" data-open="false" data-phase="idle">
+    <section id="panel">
+      <div id="grip" title="Drag to resize"><i></i></div>
+      <div id="scroll"><p id="text"><span id="final"></span><span id="partial"></span></p></div>
+    </section>
+    <div id="control">
       <span id="dot"></span>
       <div id="wave">
         <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
         <i class="bar"></i><i class="bar"></i><i class="bar"></i><i class="bar"></i>
         <i class="bar"></i><i class="bar"></i><i class="bar"></i>
       </div>
-      <span id="hint"></span>
+      <span id="message"></span>
     </div>
   </div>
   <script src="pill.js"></script>

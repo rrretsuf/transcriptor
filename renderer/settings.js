@@ -7,51 +7,107 @@ const LANGUAGES = {
   ja: "Japanese", ko: "Korean", sv: "Swedish", da: "Danish", fi: "Finnish", no: "Norwegian",
 };
 
-const KEY_SYMBOLS = { Command: "\u2318", Control: "\u2303", Alt: "\u2325", Shift: "\u21e7" };
+const KEY_SYMBOLS = { Command: "⌘", Control: "⌃", Alt: "⌥", Shift: "⇧" };
 const pretty = (accelerator) =>
   accelerator.split("+").map((part) => KEY_SYMBOLS[part] ?? part).join("");
 
 const $ = (id) => document.getElementById(id);
-const savedEl = $("saved");
+const sub = $("sub");
 let config = null;
 let saveTimer = null;
-
-/* ---------------------------------- saving --------------------------------- */
 
 function save(patch) {
   config = { ...config, ...patch };
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    await window.flow.setConfig(patch);
-    savedEl.textContent = "Saved";
-    savedEl.classList.add("flash");
-    setTimeout(() => {
-      savedEl.classList.remove("flash");
-      savedEl.textContent = "Voice dictation anywhere on your Mac";
-    }, 1200);
-  }, 250);
+  saveTimer = setTimeout(() => window.app.setConfig(patch), 200);
+}
+
+/* ----------------------------------- usage ---------------------------------- */
+
+function sparkline(values) {
+  const max = Math.max(...values);
+  if (max <= 0) return null;
+  const step = 132 / Math.max(1, values.length - 1);
+  return values
+    .map((v, i) => `${i ? "L" : "M"}${(i * step).toFixed(1)},${(34 - (v / max) * 30).toFixed(1)}`)
+    .join(" ");
+}
+
+async function renderUsage() {
+  const [usage, local] = await Promise.all([window.app.usage(30), window.app.localStats()]);
+
+  $("lCount").textContent = local.count.toLocaleString();
+  $("lWords").textContent = local.words.toLocaleString();
+
+  if (!usage.ok) {
+    $("uCost").textContent = "—";
+    $("uCap").textContent = `Soniox usage unavailable — ${usage.message}`;
+    $("tiles").classList.remove("loading");
+    return;
+  }
+
+  $("uCost").textContent = usage.costUsd < 0.01 && usage.costUsd > 0
+    ? `$${usage.costUsd.toFixed(4)}`
+    : `$${usage.costUsd.toFixed(2)}`;
+  $("uCap").textContent = usage.requests
+    ? "Last 30 days on Soniox"
+    : "No Soniox usage recorded in the last 30 days";
+  $("uReq").textContent = usage.requests.toLocaleString();
+  $("uMin").textContent = Math.round(usage.audioMs / 60000).toLocaleString();
+  $("tiles").classList.remove("loading");
+
+  const path = sparkline(usage.dailyCost);
+  if (path) {
+    $("spark").hidden = false;
+    $("spark").querySelector("path").setAttribute("d", path);
+  }
 }
 
 /* --------------------------------- languages -------------------------------- */
 
 function renderLanguages() {
   const host = $("languages");
+  const picker = $("addLanguage");
+  const chosen = config.languageHints.filter((code) => LANGUAGES[code]);
+
   host.innerHTML = "";
-  for (const [code, name] of Object.entries(LANGUAGES)) {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "chip";
-    chip.textContent = name;
-    chip.setAttribute("aria-pressed", String(config.languageHints.includes(code)));
-    chip.onclick = () => {
-      const on = chip.getAttribute("aria-pressed") === "true";
-      chip.setAttribute("aria-pressed", String(!on));
-      const next = on
-        ? config.languageHints.filter((c) => c !== code)
-        : [...config.languageHints, code];
-      save({ languageHints: next });
+  for (const code of chosen) {
+    const token = document.createElement("button");
+    token.type = "button";
+    token.className = "chip";
+    token.setAttribute("aria-pressed", "true");
+    token.innerHTML = `${LANGUAGES[code]}<span class="x">\u00d7</span>`;
+    token.title = "Remove";
+    token.onclick = () => {
+      save({ languageHints: chosen.filter((c) => c !== code) });
+      renderLanguages();
     };
-    host.appendChild(chip);
+    host.appendChild(token);
+  }
+
+  picker.innerHTML = "";
+  picker.add(new Option(chosen.length ? "Add language" : "Add language", ""));
+  for (const [code, name] of Object.entries(LANGUAGES)) {
+    if (!chosen.includes(code)) picker.add(new Option(name, code));
+  }
+  picker.onchange = () => {
+    if (!picker.value) return;
+    save({ languageHints: [...chosen, picker.value] });
+    renderLanguages();
+  };
+
+  $("langNote").textContent = chosen.length
+    ? "Soniox listens for these first."
+    : "Automatic — Soniox detects the language on its own.";
+}
+
+function renderPosition() {
+  for (const chip of $("position").children) {
+    chip.setAttribute("aria-pressed", String(chip.dataset.value === config.position));
+    chip.onclick = () => {
+      save({ position: chip.dataset.value });
+      renderPosition();
+    };
   }
 }
 
@@ -92,7 +148,7 @@ function bindHotkey() {
   };
   field.onclick = () => {
     field.classList.add("capturing");
-    field.value = "Press keys…";
+    field.value = "Press keys";
     field.focus();
   };
   field.onblur = stop;
@@ -111,26 +167,26 @@ function bindHotkey() {
 /* -------------------------------- permissions ------------------------------- */
 
 async function refreshPermissions() {
-  const status = await window.flow.permStatus();
+  const status = await window.app.permStatus();
 
-  const micGranted = status.microphone === "granted";
-  $("micBtn").textContent = micGranted ? "Granted" : "Grant";
-  $("micBtn").disabled = micGranted;
-  $("micBtn").classList.toggle("granted", micGranted);
-  $("micNote").textContent = micGranted
-    ? "Soniox Flow can record your voice."
+  const mic = status.microphone === "granted";
+  $("micBtn").textContent = mic ? "Granted" : "Grant";
+  $("micBtn").disabled = mic;
+  $("micBtn").classList.toggle("done", mic);
+  $("micNote").textContent = mic
+    ? "Transcriber can record your voice."
     : "Required to record your voice.";
 
-  const axGranted = status.accessibility;
-  $("axBtn").textContent = axGranted ? "Granted" : "Grant";
-  $("axBtn").disabled = axGranted;
-  $("axBtn").classList.toggle("granted", axGranted);
-  $("axNote").textContent = axGranted
-    ? "Soniox Flow can paste at the cursor."
-    : "Required to paste at the cursor. Restart the app after granting.";
+  const ax = status.accessibility;
+  $("axBtn").textContent = ax ? "Granted" : "Grant";
+  $("axBtn").disabled = ax;
+  $("axBtn").classList.toggle("done", ax);
+  $("axNote").textContent = ax
+    ? "Transcriber can paste at the cursor."
+    : "Required to paste at the cursor. Restart after granting.";
 }
 
-/* ----------------------------------- key ------------------------------------ */
+/* ------------------------------------ key ----------------------------------- */
 
 async function verifyKey() {
   const key = $("apiKey").value.trim();
@@ -144,7 +200,7 @@ async function verifyKey() {
   status.className = "note";
   status.textContent = "Checking…";
 
-  const result = await window.flow.verifyKey(key);
+  const result = await window.app.verifyKey(key);
   $("verify").disabled = false;
 
   if (!result.ok) {
@@ -153,23 +209,21 @@ async function verifyKey() {
     return;
   }
   status.className = "note ok";
-  status.textContent = "Key works. Stored encrypted in your macOS Keychain.";
+  status.textContent = "Key works. Encrypted in your macOS Keychain.";
 
   if (result.models?.length) {
     const select = $("model");
     select.innerHTML = "";
-    for (const id of result.models) {
-      const option = new Option(id, id, false, id === config.model);
-      select.add(option);
-    }
+    for (const id of result.models) select.add(new Option(id, id, false, id === config.model));
     if (!result.models.includes(config.model)) save({ model: result.models[0] });
   }
+  renderUsage();
 }
 
 /* ----------------------------------- boot ----------------------------------- */
 
 (async () => {
-  config = await window.flow.getConfig();
+  config = await window.app.getConfig();
 
   $("apiKey").value = config.apiKey || "";
   $("model").value = config.model;
@@ -180,11 +234,14 @@ async function verifyKey() {
   $("silenceStopMs").value = String(config.silenceStopMs);
   $("autoPaste").checked = config.autoPaste;
   $("restoreClipboard").checked = config.restoreClipboard;
+  $("saveHistory").checked = config.saveHistory;
   $("launchAtLogin").checked = config.launchAtLogin;
 
   renderLanguages();
+  renderPosition();
   bindHotkey();
   refreshPermissions();
+  renderUsage();
 
   $("apiKey").oninput = (e) => save({ apiKey: e.target.value.trim() });
   $("model").onchange = (e) => save({ model: e.target.value });
@@ -193,11 +250,13 @@ async function verifyKey() {
   $("silenceStopMs").onchange = (e) => save({ silenceStopMs: Number(e.target.value) });
   $("autoPaste").onchange = (e) => save({ autoPaste: e.target.checked });
   $("restoreClipboard").onchange = (e) => save({ restoreClipboard: e.target.checked });
+  $("saveHistory").onchange = (e) => save({ saveHistory: e.target.checked });
   $("launchAtLogin").onchange = (e) => save({ launchAtLogin: e.target.checked });
 
   $("verify").onclick = verifyKey;
-  $("micBtn").onclick = async () => { await window.flow.askMicrophone(); refreshPermissions(); };
-  $("axBtn").onclick = async () => { await window.flow.askAccessibility(); };
+  $("console").onclick = () => window.app.openConsole();
+  $("micBtn").onclick = async () => { await window.app.askMicrophone(); refreshPermissions(); };
+  $("axBtn").onclick = () => window.app.askAccessibility();
 
   window.addEventListener("focus", refreshPermissions);
 })();
