@@ -1,90 +1,104 @@
-# Transcriber
+# Transcriptor
 
 Press a hotkey anywhere on macOS, speak, and the text lands at your cursor.
 Streaming speech-to-text through the [Soniox](https://soniox.com) real-time API.
+Native Swift, one small binary, no Electron.
 
 - Menu bar app — no dock icon, no window in the way.
-- One glass surface that stays out of your way: a small capsule while you talk,
-  clicked open into a live transcript you can drag taller.
-- Dock it at the bottom, the left edge or the right edge.
+- The notch is the UI: it springs open into an island while you talk, shows the
+  live transcript on one line, then retreats.
 - Pastes straight into whatever app you were typing in.
 - Every transcription is kept locally and searchable.
-- Your API key is encrypted in the macOS Keychain. Audio goes to Soniox and nowhere else.
+- Your API key lives in the macOS Keychain. Audio goes to Soniox and nowhere else.
 - No account, no telemetry, no local model downloads.
 
 ## Requirements
 
-- macOS on Apple Silicon
-- Node.js 22+
+- macOS 26+ on Apple Silicon
+- Xcode 26+ command line tools (`xcode-select --install`)
 - A Soniox API key from [console.soniox.com](https://console.soniox.com)
 
-## Run
+## Install
 
 ```bash
-npm install
-npm start
+git clone https://github.com/rrretsuf/transcriptor.git
+cd transcriptor
+./build.sh
 ```
 
-Add your API key in Settings, then grant **Microphone** and **Accessibility**
-(Accessibility is what allows the paste at your cursor).
+`build.sh` compiles the app, installs it to `/Applications/Transcriptor.app` and
+launches it. First run:
 
-## Build a real app
+1. Menu bar icon → **Settings…** → paste your Soniox API key.
+2. Allow **Microphone** when asked.
+3. Allow **Accessibility** (System Settings › Privacy & Security) so the text can
+   be pasted at your cursor.
+
+Updating is the same: `git pull && ./build.sh`.
+
+### For AI agents
+
+If you are an agent installing this for a user, run exactly:
 
 ```bash
-npm run dist
+git clone https://github.com/rrretsuf/transcriptor.git ~/transcriptor && cd ~/transcriptor && ./build.sh
 ```
 
-`dist/mac-arm64/Transcriber.app` is signed with your local **Transcriber Local Signing**
-identity. Drag it to `/Applications`. Because the identity (not the build hash) is what
-macOS ties the Accessibility grant to, the grant survives future rebuilds — grant it once.
+Then tell the user to add their Soniox key in Settings and grant Microphone and
+Accessibility. Nothing else is required; there is no package manager, no
+dependencies, no configuration file to write.
+
+### Stable code signing (optional)
+
+By default the app is ad-hoc signed, so macOS forgets the Accessibility grant
+after every rebuild. To keep it, create a self-signed code-signing certificate
+named **Transcriptor Local Signing** in Keychain Access
+(Certificate Assistant › Create a Certificate › Code Signing). `build.sh` picks it
+up automatically; `SIGN_IDENTITY="…" ./build.sh` uses a different name.
 
 ## Use
 
 | Action | Key |
 | --- | --- |
-| Start / stop dictation | `⌘⇧Space` |
-| Dictate an email | `⌘⇧E` |
+| Start / stop dictation | `⌥ Space` (change it in Settings — click, press keys) |
+| Dictate an email | `⌘ ⇧ E` |
 | Cancel without pasting | `Esc` |
-| Show or hide the live transcript | Click the capsule |
-| Resize the transcript | Drag its grip |
+| Show the transcript feed under the notch | Click the island (remembered) |
+| Copy a past transcription | Click it in **All Transcriptions** |
 
-The menu bar icon animates while recording, and its menu holds
-**All transcriptions**, **Copy last transcription** and **Settings**.
+The menu bar icon animates while recording; its menu holds
+**All Transcriptions**, **Copy Last Transcription** and **Settings**.
 
 ## Settings
 
-- **Usage** — requests, audio minutes and spend pulled from Soniox, next to your
-  own local counts.
-- **Model** — defaults to `stt-rt-v5`, Soniox's current real-time model.
-- **Languages** — hints for the recognizer. Add none for auto-detection.
-- **Translate to** — transcribe in one language, paste in another.
-- **Vocabulary** — names and jargon Soniox should get right.
-- **Position** — where the capsule sits.
-- **Stop after silence** — finish automatically instead of pressing the hotkey again.
-- **Keep transcriptions** — local history on or off.
-- **After-transcript cleanup** — optional polish through OpenRouter
-  (`thinkingmachines/inkling-small` on Baseten) before pasting.
-  Off by default; Light removes filler words, Medium adds punctuation and
-  paragraphs, Hard structures the text for reuse as AI instructions.
-  Model and provider are configurable, with Verify buttons.
-- **Email dictation** — `⌘⇧E` structures the transcript as an email in your
-  writing style (learned from sent mail). On by default, with its own
-  OpenRouter model and provider.
+- **General** — hotkey (recorded live, or a modifier double-tap), launch at login, Soniox key.
+- **Dictation** — model (`stt-rt-v5`), language hints, translate-to, context terms,
+  stop after silence, paste at cursor, restore clipboard, save transcriptions.
+- **AI** — optional cleanup through OpenRouter (Light / Medium / Hard / Experiment),
+  email mode with its own model, OpenRouter key, usage totals.
 
 ## How it works
 
 ```
-hotkey → getUserMedia → AudioWorklet (16 kHz s16le, 40 ms chunks)
+hotkey → AVAudioEngine (16 kHz s16le, 40 ms chunks)
        → wss://stt-rt.soniox.com/transcribe-websocket
-       → final + partial tokens → surface
+       → final + partial tokens → notch island
        → clipboard → ⌘V at the cursor
 ```
 
 Audio is streamed as it is spoken, so most of the transcript is already final by
 the time you stop talking. Audio itself is never written to disk.
 
-Local state lives in `~/Library/Application Support/Transcriber`:
-`config.json` (key encrypted) and `history.json`.
+Local state lives in `~/Library/Application Support/Transcriptor`:
+`config.json`, `history.json`, `cleanup-stats.json`, and `experiments/` for the
+Experiment cleanup tier.
+
+## Develop
+
+```bash
+swift test      # unit tests
+./build.sh      # rebuild, reinstall, relaunch
+```
 
 ## License
 
