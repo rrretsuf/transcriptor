@@ -120,5 +120,6 @@ swift test      # unit tests
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE). Use it, read it, change it for yourself —
-freely. Selling it, or a product built on it, is not permitted.
+[PolyForm Shield 1.0.0](LICENSE). Use it anywhere — at home, at work, in your
+company — read it, change it, share it with a colleague. The one thing you may not
+do is turn it into a competing product.
