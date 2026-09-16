@@ -34,13 +34,16 @@ Add your API key in Settings, then grant **Microphone** and **Accessibility**
 npm run dist
 ```
 
-`dist/mac-arm64/Transcriber.app` is built and ad-hoc signed. Drag it to `/Applications`.
+`dist/mac-arm64/Transcriber.app` is signed with your local **Transcriber Local Signing**
+identity. Drag it to `/Applications`. Because the identity (not the build hash) is what
+macOS ties the Accessibility grant to, the grant survives future rebuilds — grant it once.
 
 ## Use
 
 | Action | Key |
 | --- | --- |
-| Start / stop dictation | `⌘⇧Space` (configurable) |
+| Start / stop dictation | `⌘⇧Space` |
+| Dictate an email | `⌘⇧E` |
 | Cancel without pasting | `Esc` |
 | Show or hide the live transcript | Click the capsule |
 | Resize the transcript | Drag its grip |
@@ -59,6 +62,14 @@ The menu bar icon animates while recording, and its menu holds
 - **Position** — where the capsule sits.
 - **Stop after silence** — finish automatically instead of pressing the hotkey again.
 - **Keep transcriptions** — local history on or off.
+- **After-transcript cleanup** — optional polish through OpenRouter
+  (`thinkingmachines/inkling-small` on Baseten) before pasting.
+  Off by default; Light removes filler words, Medium adds punctuation and
+  paragraphs, Hard structures the text for reuse as AI instructions.
+  Model and provider are configurable, with Verify buttons.
+- **Email dictation** — `⌘⇧E` structures the transcript as an email in your
+  writing style (learned from sent mail). On by default, with its own
+  OpenRouter model and provider.
 
 ## How it works
 

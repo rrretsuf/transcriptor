@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src wss://stt-rt.soniox.com; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'none'" />
 <title>Transcriptions</title>
 <link rel="stylesheet" href="app.css" />
 </head>
@@ -9,13 +10,14 @@
   <header style="display: flex; align-items: flex-end; justify-content: space-between; gap: 16px">
     <div>
       <h1>Transcriptions</h1>
-      <p class="sub" id="summary">Everything you have dictated, kept on this Mac.</p>
+      <p class="sub" id="summary">Your transcriptions, kept on this Mac.</p>
     </div>
     <button id="clear" class="quiet" style="-webkit-app-region: no-drag">Clear all</button>
   </header>
 
   <main>
-    <input id="search" class="search" type="search" placeholder="Search transcriptions" spellcheck="false" />
+    <p id="historyStatus" class="note bad" role="status" hidden></p>
+    <input id="search" class="search" type="search" aria-label="Search transcriptions" placeholder="Search transcriptions" spellcheck="false" />
     <div class="group" id="list" style="margin-top: 14px"></div>
   </main>
 

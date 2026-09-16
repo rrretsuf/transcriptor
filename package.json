@@ -8,8 +8,10 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac && codesign --force --deep --sign - \"dist/mac-arm64/Transcriber.app\"",
-    "icons": "python3 scripts/make-icons.py"
+    "dist": "npm run keytap && electron-builder --mac",
+    "icons": "python3 scripts/make-icons.py",
+    "test": "node --test tests/geometry.cjs tests/main.cjs tests/session.cjs && electron tests/renderer.cjs",
+    "keytap": "swiftc -O -o assets/keytap scripts/keytap.swift"
   },
   "devDependencies": {
     "electron": "^44.2.0",
@@ -39,7 +41,11 @@
         "LSUIElement": true,
         "NSMicrophoneUsageDescription": "Transcriber needs the microphone to transcribe your speech."
       },
-      "identity": null
-    }
+      "identity": "Transcriber Local Signing",
+      "hardenedRuntime": false
+    },
+    "asarUnpack": [
+      "assets/keytap"
+    ]
   }
 }

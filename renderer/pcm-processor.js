@@ -6,6 +6,16 @@ class PcmProcessor extends AudioWorkletProcessor {
     this.buffer = new Int16Array(CHUNK);
     this.count = 0;
     this.energy = 0;
+    this.port.onmessage = ({ data }) => {
+      if (data !== "flush") return;
+      if (this.count) {
+        const pcm = this.buffer.slice(0, this.count);
+        this.port.postMessage({ pcm: pcm.buffer, rms: Math.sqrt(this.energy / this.count) }, [pcm.buffer]);
+        this.count = 0;
+        this.energy = 0;
+      }
+      this.port.postMessage({ flushed: true });
+    };
   }
 
   process(inputs) {

@@ -3,19 +3,26 @@ const SPEECH_RMS = 0.02;
 const SILENCE_RMS = 0.012;
 const FINISH_TIMEOUT_MS = 8000;
 const MIN_PANEL = 96;
+const CONNECT_TIMEOUT_MS = 10000;
+const MAX_BUFFER_BYTES = SAMPLE_RATE * 2 * 15;
+
+const traceLog = (label) => { if (window.__trace) console.log(`[trace] ${label} ${Math.round(performance.now())}`); };
 
 const surface = document.getElementById("surface");
 const finalEl = document.getElementById("final");
 const partialEl = document.getElementById("partial");
 const scrollEl = document.getElementById("scroll");
+const textEl = document.getElementById("text");
 const messageEl = document.getElementById("message");
 const bars = [...document.querySelectorAll(".bar")];
 
 let socket = null;
 let stream = null;
 let audio = null;
+let source = null;
 let worklet = null;
 let session = null;
+let audioContext = null;
 
 let finalText = "";
 let partialText = "";
@@ -26,6 +33,16 @@ let heardSpeech = false;
 let silenceStart = 0;
 let finishTimer = null;
 let panelHeight = 180;
+let followTranscript = true;
+let sessionGeneration = 0;
+let connectTimer = null;
+let captureStopped = false;
+let capturedDuration = 0;
+let lastContentHeight = 0;
+let flushResolve = null;
+let panelOpen = false;
+let renderScheduled = false;
+let scrollPadding = 0;
 
 /* ------------------------------------ ui ------------------------------------ */
 
@@ -34,12 +51,41 @@ function setPhase(phase, message = "") {
   messageEl.textContent = message;
 }
 
-function renderTranscript() {
-  finalEl.textContent = finalText;
-  partialEl.textContent = partialText;
-  surface.dataset.empty = String(!finalText && !partialText);
-  scrollEl.scrollTop = scrollEl.scrollHeight;
+// Collapsed the panel is invisible, so measuring and repainting it is pure waste.
+function scheduleRender() {
+  if (!panelOpen || renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    renderTranscript();
+  });
 }
+
+function measurePadding() {
+  const style = getComputedStyle(scrollEl);
+  scrollPadding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+}
+
+function renderTranscript() {
+  if (finalEl.textContent !== finalText) finalEl.textContent = finalText;
+  if (partialEl.textContent !== partialText) partialEl.textContent = partialText;
+  surface.dataset.empty = String(!finalText && !partialText);
+  reportContentHeight();
+  if (followTranscript) scrollEl.scrollTop = scrollEl.scrollHeight;
+}
+
+function reportContentHeight() {
+  const height = textEl.getBoundingClientRect().height + scrollPadding + 15;
+  const next = Math.max(MIN_PANEL, Math.ceil(height));
+  if (next !== lastContentHeight) {
+    lastContentHeight = next;
+    window.app.contentHeight(next);
+  }
+}
+
+scrollEl.addEventListener("scroll", () => {
+  followTranscript = scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop < 24;
+}, { passive: true });
 
 function pushLevel(rms) {
   const level = Math.min(1, Math.pow(Math.max(0, rms) * 8, 0.75));
@@ -65,9 +111,55 @@ function buildConfig(cfg) {
     enable_endpoint_detection: true,
   };
   if (cfg.languageHints?.length) message.language_hints = cfg.languageHints;
-  if (cfg.context?.trim()) message.context = cfg.context.trim();
+  if (cfg.context?.trim()) message.context = { terms: cfg.context.split(/[,\n]+/).map(term => term.trim()).filter(Boolean) };
   if (cfg.translateTo) message.translation = { type: "one_way", target_language: cfg.translateTo };
   return message;
+}
+
+// One context lives as long as the renderer does; recreating it per session only
+// re-pays the AudioContext latency for no benefit.
+async function audioGraph() {
+  if (audioContext && audioContext.state !== "closed") {
+    await audioContext.resume().catch(() => {});
+    return audioContext;
+  }
+  const context = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
+  await context.audioWorklet.addModule("pcm-processor.js");
+  audioContext = context;
+  return context;
+}
+
+// Compiling the worklet costs ~50 ms the first time; pay it before the first hotkey press.
+async function warmAudio() {
+  try { await audioGraph(); } catch { /* the first dictation pays it instead */ }
+}
+
+// Opening the mic once spawns the audio helper process and warms the capture path,
+// so the first hotkey press does not pay the spawn; the stream is dropped immediately.
+async function warmMic() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    s.getTracks().forEach((track) => track.stop());
+  } catch { /* the first dictation asks for permission instead */ }
+}
+
+// A throwaway connection caches DNS + TLS so the next real one resumes instead of
+// paying a full handshake (~1 s cold, ~0.3 s warm otherwise).
+function warmSocket() {
+  const ws = new WebSocket("wss://stt-rt.soniox.com/transcribe-websocket");
+  const done = () => { clearTimeout(timer); if (ws.readyState <= WebSocket.OPEN) ws.close(); };
+  const timer = setTimeout(done, 5000);
+  ws.onopen = done;
+  ws.onerror = done;
+  ws.onclose = done;
+}
+
+function warmup() {
+  warmAudio();
+  warmMic();
+  warmSocket();
 }
 
 const isSpecialToken = (text) => /^<[^>]+>$/.test(text);
@@ -93,21 +185,29 @@ function handleMessage(event) {
     if (token.is_final) finalText += token.text;
     else pending += token.text;
   }
-  partialText = pending;
-  renderTranscript();
+  if (message.tokens) {
+    partialText = pending;
+    scheduleRender();
+  }
 
   if (message.finished) finish();
 }
 
 async function start(cfg) {
+  traceLog("start:called");
+  const generation = ++sessionGeneration;
+  followTranscript = true;
   session = cfg;
   finalText = "";
   partialText = "";
   queue = [];
+  captureStopped = false;
+  capturedDuration = 0;
+  lastContentHeight = 0;
   stopping = false;
   heardSpeech = false;
   silenceStart = 0;
-  startedAt = performance.now();
+  startedAt = 0;
   resetBars();
   renderTranscript();
   setPhase("connecting");
@@ -117,28 +217,53 @@ async function start(cfg) {
     socket.binaryType = "arraybuffer";
     socket.onmessage = handleMessage;
     socket.onerror = () => fail("Soniox unreachable");
+    socket.onclose = () => fail("Connection closed before transcription completed");
+    connectTimer = setTimeout(() => fail("Connection timed out"), CONNECT_TIMEOUT_MS);
     socket.onopen = () => {
+      traceLog("start:socket-open");
+      clearTimeout(connectTimer);
       socket.send(JSON.stringify(buildConfig(cfg)));
       for (const chunk of queue) socket.send(chunk);
       queue = [];
-      if (!stopping) setPhase("listening");
+      if (stopping && captureStopped) finalizeStream();
     };
 
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const [inputStream, context] = await Promise.all([
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      }),
+      audioGraph(),
+    ]);
+    traceLog("start:mic+audio-ready");
 
-    audio = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "interactive" });
-    await audio.audioWorklet.addModule("pcm-processor.js");
-    worklet = new AudioWorkletNode(audio, "pcm-processor", { numberOfOutputs: 0 });
-    worklet.port.onmessage = ({ data }) => onAudioChunk(data);
-    audio.createMediaStreamSource(stream).connect(worklet);
+    if (generation !== sessionGeneration || stopping) {
+      inputStream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    stream = inputStream;
+    stream.getTracks().forEach(track => { track.onended = () => fail("Microphone disconnected"); });
+    audio = context;
+    worklet = new AudioWorkletNode(context, "pcm-processor", { numberOfOutputs: 0 });
+    worklet.port.onmessage = ({ data }) => {
+      if (generation !== sessionGeneration) return;
+      if (data.pcm) onAudioChunk(data);
+      if (data.flushed) flushResolve?.();
+    };
+    source = context.createMediaStreamSource(stream);
+    source.connect(worklet);
+    await context.resume();
+    if (generation !== sessionGeneration || stopping) return stopCapture();
+    startedAt = performance.now();
+    // Audio captured before the socket opens is queued, so waiting on it would only stall the UI.
+    setPhase("listening");
+    traceLog("start:listening");
   } catch (err) {
+    if (generation !== sessionGeneration || stopping) return;
     fail(err.name === "NotAllowedError" ? "Microphone denied" : err.message);
   }
 }
@@ -146,72 +271,117 @@ async function start(cfg) {
 function onAudioChunk({ pcm, rms }) {
   pushLevel(rms);
 
-  if (socket?.readyState === WebSocket.OPEN) socket.send(pcm);
-  else if (!stopping) queue.push(pcm);
+  if (socket?.readyState === WebSocket.OPEN) {
+    if (socket.bufferedAmount > MAX_BUFFER_BYTES) return fail("Connection is too slow");
+    socket.send(pcm);
+  } else if (socket?.readyState === WebSocket.CONNECTING) {
+    if (queue.length * 1280 >= MAX_BUFFER_BYTES) return fail("Connection is too slow");
+    queue.push(pcm);
+  }
+
+  if (stopping) return;
 
   if (!session?.silenceStopMs) return;
   if (rms > SPEECH_RMS) { heardSpeech = true; silenceStart = 0; return; }
-  if (!heardSpeech || rms > SILENCE_RMS) return;
+  if (rms > SILENCE_RMS) { silenceStart = 0; return; }
+  if (!heardSpeech) return;
   const now = performance.now();
   if (!silenceStart) silenceStart = now;
   else if (now - silenceStart > session.silenceStopMs) { silenceStart = 0; window.app.autostop(); }
 }
 
 function stopCapture() {
+  source?.disconnect();
   worklet?.port.close();
   worklet?.disconnect();
-  audio?.close();
-  stream?.getTracks().forEach((track) => track.stop());
+  stream?.getTracks().forEach((track) => { track.onended = null; track.stop(); });
+  // The context stays alive for the next session; only the capture is released.
+  audioContext?.suspend().catch(() => {});
+  source = null;
   worklet = null;
   audio = null;
   stream = null;
 }
 
-function stop() {
+async function stop() {
   if (stopping) return;
   stopping = true;
-  stopCapture();
+  capturedDuration = startedAt ? Math.round(performance.now() - startedAt) : 0;
   setPhase("transcribing");
-  if (socket?.readyState === WebSocket.OPEN) {
-    socket.send("");
-    finishTimer = setTimeout(finish, FINISH_TIMEOUT_MS);
-  } else {
-    finish();
+  const generation = sessionGeneration;
+  stream?.getTracks().forEach(track => { track.onended = null; track.stop(); });
+  if (worklet) {
+    await new Promise(resolve => {
+      const timer = setTimeout(resolve, 100);
+      flushResolve = () => { clearTimeout(timer); resolve(); };
+      worklet.port.postMessage("flush");
+    });
   }
+  if (generation !== sessionGeneration) return;
+  flushResolve = null;
+  stopCapture();
+  captureStopped = true;
+  if (socket?.readyState === WebSocket.OPEN) finalizeStream();
+}
+
+function finalizeStream() {
+  if (finishTimer) return;
+  socket.send("");
+  finishTimer = setTimeout(() => fail("Final transcription timed out"), FINISH_TIMEOUT_MS);
+}
+
+function resultPayload() {
+  return {
+    id: session?.id,
+    text: (finalText + partialText).replace(/\s+/g, " ").trim(),
+    durationMs: stopping ? capturedDuration : startedAt ? Math.round(performance.now() - startedAt) : 0,
+  };
 }
 
 function finish() {
-  clearTimeout(finishTimer);
-  const text = (finalText + partialText).replace(/\s+/g, " ").trim();
-  const durationMs = Math.round(performance.now() - startedAt);
+  const result = resultPayload();
   teardown();
-  window.app.result({ text, durationMs });
+  setPhase("idle");
+  window.app.result(result);
 }
 
 function fail(message) {
-  clearTimeout(finishTimer);
+  const result = resultPayload();
   teardown();
   setPhase("error", message);
-  window.app.error(message);
+  messageEl.title = message;
+  window.app.error({ ...result, message });
 }
 
 function cancel() {
-  clearTimeout(finishTimer);
   teardown();
   setPhase("idle");
 }
 
 function teardown() {
+  sessionGeneration++;
+  clearTimeout(finishTimer);
+  clearTimeout(connectTimer);
+  finishTimer = null;
+  connectTimer = null;
+  flushResolve?.();
+  flushResolve = null;
   stopCapture();
   if (socket) {
     socket.onmessage = null;
     socket.onerror = null;
     socket.onopen = null;
+    socket.onclose = null;
     if (socket.readyState <= WebSocket.OPEN) socket.close();
     socket = null;
   }
   queue = [];
   stopping = true;
+  finalText = "";
+  partialText = "";
+  renderTranscript();
+  // The TLS cache from this session goes stale; refresh it for the next one.
+  setTimeout(warmSocket, 30000);
 }
 
 /* --------------------------------- surface ---------------------------------- */
@@ -224,7 +394,7 @@ grip.addEventListener("pointerdown", (event) => {
   grip.setPointerCapture(event.pointerId);
   const originY = event.screenY;
   const originHeight = panelHeight;
-  const grows = surface.dataset.position === "bottom" ? -1 : 1;
+  const grows = surface.dataset.position === "bottom" ? -1 : 2;
 
   const onMove = (move) => {
     panelHeight = Math.max(MIN_PANEL, originHeight + grows * (move.screenY - originY));
@@ -233,23 +403,38 @@ grip.addEventListener("pointerdown", (event) => {
   const onUp = () => {
     grip.removeEventListener("pointermove", onMove);
     grip.removeEventListener("pointerup", onUp);
+    grip.removeEventListener("pointercancel", onUp);
+    grip.removeEventListener("lostpointercapture", onUp);
     window.app.commitResize();
   };
   grip.addEventListener("pointermove", onMove);
   grip.addEventListener("pointerup", onUp);
+  grip.addEventListener("pointercancel", onUp);
+  grip.addEventListener("lostpointercapture", onUp);
 });
 
 window.app.onLayout(({ position, open, height }) => {
   surface.dataset.position = position;
   surface.dataset.open = String(open);
   panelHeight = height;
+  panelOpen = open;
+  measurePadding();
+  warmAudio();
+  if (open) renderTranscript();
 });
 
 window.app.onStart((cfg) => {
   surface.dataset.position = cfg.position;
   surface.dataset.open = String(cfg.open);
-  panelHeight = cfg.height;
+  panelOpen = cfg.open;
+  // The main process sends the actual clamped height via onLayout.
   start(cfg);
 });
+
+measurePadding();
 window.app.onStop(stop);
 window.app.onCancel(cancel);
+window.app.onPolishing(() => setPhase("polishing"));
+
+// Warm once shortly after launch so the boot paint and the warmup do not compete.
+setTimeout(warmup, 400);

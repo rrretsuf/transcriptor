@@ -31,16 +31,23 @@ body {
 
 #surface {
   height: 100%;
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-#surface[data-position="left"] { flex-direction: row-reverse; }
-#surface[data-position="right"] { flex-direction: row; }
+#surface[data-position="left"] { flex-direction: row; }
+#surface[data-position="right"] { flex-direction: row-reverse; }
 
 /* --------------------------------- control -------------------------------- */
 
 #control {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 132px;
   flex: none;
   display: flex;
   align-items: center;
@@ -58,9 +65,15 @@ body {
 [data-position="right"] #control {
   flex-direction: column;
   width: 34px;
-  height: auto;
+  height: 132px;
+  top: 50%;
+  bottom: auto;
+  left: 0;
+  transform: translateY(-50%);
   padding: 12px 0;
 }
+
+[data-position="right"] #control { left: auto; right: 0; }
 
 [data-open="true"][data-position="left"] #control { border-right: 1px solid var(--hairline); }
 [data-open="true"][data-position="right"] #control { border-left: 1px solid var(--hairline); }
@@ -74,7 +87,7 @@ body {
 }
 
 [data-phase="listening"] #dot { background: var(--rec); animation: pulse 1.6s ease-in-out infinite; }
-[data-phase="transcribing"] #dot { background: var(--ink-dim); animation: pulse .9s ease-in-out infinite; }
+[data-phase="transcribing"] #dot, [data-phase="polishing"] #dot { background: var(--ink-dim); animation: pulse .9s ease-in-out infinite; }
 [data-phase="error"] #dot { background: var(--rec); }
 
 @keyframes pulse {
@@ -93,11 +106,12 @@ body {
 
 .bar {
   width: 2px;
-  height: calc(3px + var(--l, 0) * 15px);
+  height: 18px;
+  transform: scaleY(calc((3 + var(--l, 0) * 15) / 18));
   border-radius: 1px;
   background: var(--ink);
   opacity: .9;
-  transition: height .07s linear, width .07s linear, opacity .3s ease;
+  transition: transform .07s linear, opacity .3s ease;
 }
 
 [data-position="left"] #wave,
@@ -105,12 +119,13 @@ body {
 
 [data-position="left"] .bar,
 [data-position="right"] .bar {
-  width: calc(3px + var(--l, 0) * 15px);
+  width: 18px;
   height: 2px;
+  transform: scaleX(calc((3 + var(--l, 0) * 15) / 18));
 }
 
 [data-phase="connecting"] .bar,
-[data-phase="transcribing"] .bar { opacity: .3; }
+[data-phase="transcribing"] .bar, [data-phase="polishing"] .bar { opacity: .3; }
 [data-phase="error"] #wave { display: none; }
 
 #message {
@@ -124,13 +139,35 @@ body {
 /* ---------------------------------- panel --------------------------------- */
 
 #panel {
-  flex: 1;
+  position: absolute;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 440px;
+  height: calc(100% - 34px);
   min-height: 0;
-  display: none;
+  display: flex;
   flex-direction: column;
+  visibility: hidden;
+  opacity: 0;
 }
 
-[data-open="true"] #panel { display: flex; }
+[data-open="true"] #panel {
+  visibility: visible;
+  opacity: 1;
+  animation: panel-in .14s ease-out;
+}
+
+@keyframes panel-in { from { opacity: 0; } to { opacity: 1; } }
+
+[data-position="left"] #panel,
+[data-position="right"] #panel {
+  bottom: 0;
+  left: 34px;
+  transform: none;
+  height: 100%;
+}
+[data-position="right"] #panel { left: auto; right: 34px; }
 [data-open="true"][data-position="bottom"] #panel { border-bottom: 1px solid var(--hairline); }
 
 #grip {
@@ -140,6 +177,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: ns-resize;
+  touch-action: none;
 }
 
 #grip i {
@@ -161,6 +199,8 @@ body {
   overflow-y: auto;
   padding: 2px 16px 12px;
   scrollbar-width: none;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
 }
 
 #scroll::-webkit-scrollbar { display: none; }
@@ -181,3 +221,14 @@ body {
   content: "Listening";
   color: var(--ink-dim);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+#surface[data-phase="error"] #panel { visibility: hidden; }
+#surface[data-phase="error"] #control {
+  top: auto; bottom: 0; left: 0; right: auto; transform: none;
+  width: 100%; height: 34px; flex-direction: row; padding: 0 12px;
+}
+#message { overflow: hidden; text-overflow: ellipsis; }

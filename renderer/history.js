@@ -13,10 +13,12 @@ const list = document.getElementById("list");
 const search = document.getElementById("search");
 const summary = document.getElementById("summary");
 let entries = [];
+let reloadVersion = 0;
+const expanded = new Set();
 
 function renderSummary() {
   if (!entries.length) {
-    summary.textContent = "Everything you dictate is kept on this Mac.";
+    summary.textContent = "Your saved transcriptions appear here.";
     return;
   }
   const words = entries.reduce((sum, entry) => sum + (entry.words || 0), 0);
@@ -26,7 +28,12 @@ function renderSummary() {
 }
 
 function empty(title, note) {
-  list.innerHTML = `<div class="empty"><b>${title}</b>${note}</div>`;
+  const box = document.createElement("div");
+  box.className = "empty";
+  const heading = document.createElement("b");
+  heading.textContent = title;
+  box.append(heading, document.createTextNode(note));
+  list.replaceChildren(box);
 }
 
 function render() {
@@ -42,11 +49,14 @@ function render() {
   if (!shown.length) return empty("No matches", `Nothing contains “${search.value.trim()}”.`);
 
   list.innerHTML = "";
-  shown.forEach((entry, index) => {
+  const fragment = document.createDocumentFragment();
+  shown.forEach((entry) => {
     const row = document.createElement("article");
-    row.className = "entry reveal";
-    row.style.setProperty("--i", Math.min(index, 12));
-    row.setAttribute("aria-expanded", "false");
+    row.className = "entry";
+    row.tabIndex = 0;
+    row.dataset.id = entry.id;
+    row.setAttribute("aria-label", "Transcription");
+    row.setAttribute("aria-expanded", String(expanded.has(entry.id)));
     row.innerHTML = `
       <div class="entry-meta">
         <span>${ago(entry.at)}</span>
@@ -63,33 +73,73 @@ function render() {
       <div class="entry-text"></div>`;
     row.querySelector(".entry-text").textContent = entry.text;
 
-    row.onclick = (event) => {
+    row.onclick = async (event) => {
       const action = event.target.dataset?.act;
       if (action === "copy") {
-        window.app.historyCopy(entry.text);
+        try { await window.app.historyCopy(entry.text); }
+        catch { return showError("Could not copy this transcription."); }
         event.target.textContent = "Copied";
         setTimeout(() => { event.target.textContent = "Copy"; }, 1200);
         return;
       }
       if (action === "delete") {
-        window.app.historyDelete(entry.id).then((next) => { entries = next; render(); });
+        try {
+          entries = await window.app.historyDelete(entry.id);
+          expanded.delete(entry.id);
+          render();
+        } catch { showError("Could not delete this transcription. It has been kept."); }
         return;
       }
-      row.setAttribute("aria-expanded", row.getAttribute("aria-expanded") === "false");
+      if (window.getSelection().toString()) return;
+      if (expanded.has(entry.id)) expanded.delete(entry.id);
+      else expanded.add(entry.id);
+      row.setAttribute("aria-expanded", String(expanded.has(entry.id)));
     };
-    list.appendChild(row);
+    row.onkeydown = event => {
+      if (event.target === row && ["Enter", " "].includes(event.key)) {
+        event.preventDefault();
+        row.click();
+      }
+    };
+    fragment.appendChild(row);
   });
+  list.appendChild(fragment);
+}
+
+function showError(message = "") {
+  document.getElementById("historyStatus").textContent = message;
+  document.getElementById("historyStatus").hidden = !message;
 }
 
 async function reload() {
-  entries = await window.app.historyList();
-  render();
+  const version = ++reloadVersion;
+  try {
+    const next = await window.app.historyList();
+    if (version !== reloadVersion) return;
+    const main = document.querySelector("main");
+    const anchor = [...list.children].find(row => row.getBoundingClientRect().bottom > main.getBoundingClientRect().top);
+    const top = anchor?.getBoundingClientRect().top;
+    const focused = document.activeElement.closest(".entry");
+    entries = next;
+    render();
+    const match = [...list.children].find(row => row.dataset.id === anchor?.dataset.id);
+    if (match && main.scrollTop > 0) main.scrollTop += match.getBoundingClientRect().top - top;
+    if (focused) [...list.children].find(row => row.dataset.id === focused.dataset.id)?.focus({ preventScroll: true });
+    showError();
+  } catch { showError("Could not load transcriptions. Reopen this window to try again."); }
 }
 
-search.oninput = render;
-document.getElementById("clear").onclick = async () => {
-  entries = await window.app.historyClear();
+search.oninput = () => {
   render();
+  document.querySelector("main").scrollTop = 0;
+};
+document.getElementById("clear").onclick = async () => {
+  try {
+    entries = await window.app.historyClear();
+    if (!entries.length) expanded.clear();
+    render();
+    showError();
+  } catch { showError("Could not delete transcriptions. They have been kept."); }
 };
 
 window.app.onHistoryChanged(reload);
