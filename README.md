@@ -4,6 +4,8 @@ Press a hotkey anywhere on macOS, speak, and the text lands at your cursor.
 Streaming speech-to-text through the [Soniox](https://soniox.com) real-time API.
 Native Swift, one small binary, no Electron.
 
+![The notch opens into an island with the live transcript while you talk](assets/notch.jpg)
+
 - Menu bar app — no dock icon, no window in the way.
 - The notch is the UI: it springs open into an island while you talk, shows the
   live transcript on one line, then retreats.
@@ -11,6 +13,22 @@ Native Swift, one small binary, no Electron.
 - Every transcription is kept locally and searchable.
 - Your API key lives in the macOS Keychain. Audio goes to Soniox and nowhere else.
 - No account, no telemetry, no local model downloads.
+
+## Cost
+
+9 days of daily use, numbers from the app itself:
+
+| | |
+| --- | --- |
+| Transcriptions | 251 |
+| Words | 31,049 |
+| Spoken | 4 h |
+| Soniox spend | **$0.48** |
+| AI cleanups (DeepSeek via OpenRouter) | 106 for **$0.06** |
+
+At this pace a full month is ~13 hours of speech for about $1.60.
+
+![Settings: hotkeys, Keychain-stored keys and live usage](assets/settings.jpg)
 
 ## Requirements
 
