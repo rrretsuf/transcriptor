@@ -120,4 +120,5 @@ swift test      # unit tests
 
 ## License
 
-MIT
+[PolyForm Noncommercial 1.0.0](LICENSE). Use it, read it, change it for yourself —
+freely. Selling it, or a product built on it, is not permitted.
