@@ -101,7 +101,8 @@ final class AppState {
             let key = Keychain.get(Keychain.Account.soniox)
             await MainActor.run { self?.apiKey = key }
         }
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized { try? mic.warm() }
+        // Mic capture is deliberately not warmed here: the engine only runs
+        // during a dictation, so the audio device stays free while idle.
         SonioxClient.warm()
     }
 

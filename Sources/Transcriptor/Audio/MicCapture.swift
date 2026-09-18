@@ -3,6 +3,9 @@
 @preconcurrency import AVFoundation
 import Foundation
 
+// Raw microphone capture. Voice processing (echo cancellation) is deliberately
+// off: its duplex unit ducks other apps' audio and wedges the shared device on
+// macOS 26, and dictation has nothing to echo-cancel. Soniox handles noise.
 final class MicCapture {
     typealias Chunk = (pcm: Data, rms: Float)
 
@@ -16,21 +19,9 @@ final class MicCapture {
     private var converter: AVAudioConverter?
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                              sampleRate: 16000, channels: 1, interleaved: false)!
-    private var warmed = false
-
-    /// Enabling voice processing (echo cancellation, noise suppression, AGC —
-    /// pill.js' getUserMedia constraints) costs a few hundred milliseconds the
-    /// first time. Pay it at launch, not on the first word.
-    func warm() throws {
-        guard !warmed else { return }
-        try engine.inputNode.setVoiceProcessingEnabled(true)
-        engine.prepare()
-        warmed = true
-    }
 
     /// Starts the engine and returns the chunk stream.
     func start() throws -> AsyncStream<Chunk> {
-        try warm()
         let (stream, continuation) = AsyncStream.makeStream(of: Chunk.self)
         lock.withLock {
             chunker = PCMChunker()
@@ -58,10 +49,9 @@ final class MicCapture {
 
     private func handle(_ buffer: AVAudioPCMBuffer) {
         guard buffer.frameLength > 0, let channels = buffer.floatChannelData else { return }
-        // Voice processing hands out a many-channel bus (9 on Apple Silicon);
-        // the processed voice is channel 0. AVAudioConverter cannot downmix
-        // that layout (it yields silence), so take the channel by hand and let
-        // the converter do only the resample.
+        // The input can hand out a many-channel bus; the voice is channel 0.
+        // AVAudioConverter cannot downmix that layout (it yields silence), so
+        // take the channel by hand and let the converter do only the resample.
         guard let monoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: buffer.format.sampleRate,
                                              channels: 1, interleaved: false),
               let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength) else { return }
