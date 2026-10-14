@@ -24,7 +24,6 @@ Native Swift, one small binary, no Electron.
 | Words | 31,049 |
 | Spoken | 4 h |
 | Soniox spend | **$0.48** |
-| AI cleanups (DeepSeek via OpenRouter) | 106 for **$0.06** |
 
 At this pace a full month is ~13 hours of speech for about $1.60.
 
@@ -79,21 +78,29 @@ up automatically; `SIGN_IDENTITY="…" ./build.sh` uses a different name.
 | Action | Key |
 | --- | --- |
 | Start / stop dictation | `⌥ Space` (change it in Settings — click, press keys) |
-| Dictate an email | `⌘ ⇧ E` |
 | Cancel without pasting | `Esc` |
-| Show the transcript feed under the notch | Click the island (remembered) |
+| Fold the island to a dot beside the notch | Click **−** on the island, **+** to unfold (remembered) |
 | Copy a past transcription | Click it in **All Transcriptions** |
 
 The menu bar icon animates while recording; its menu holds
-**All Transcriptions**, **Copy Last Transcription** and **Settings**.
+**Copy Last Transcription**, **Transcribe File…**, **Start Meeting Transcription**,
+**All Transcriptions** and **Settings**.
+
+- **Transcribe File** — drop or choose any audio or video file; Soniox's async
+  API returns the raw transcript, ready to copy. Video is reduced to its audio
+  track before upload, and the file is deleted from Soniox afterwards.
+- **Meeting** — records your microphone plus everything the Mac plays (the other
+  side of a Meet or Zoom call), with or without headphones. Pause, continue, end;
+  the full transcript is ready to copy. The first meeting asks for the
+  **System Audio Recording** permission; without it the meeting uses the microphone only.
+
+Both save their transcripts to **All Transcriptions**.
 
 ## Settings
 
 - **General** — hotkey (recorded live, or a modifier double-tap), launch at login, Soniox key.
 - **Dictation** — model (`stt-rt-v5`), language hints, translate-to, context terms,
   stop after silence, paste at cursor, restore clipboard, save transcriptions.
-- **AI** — optional cleanup through OpenRouter (Light / Medium / Hard / Experiment),
-  email mode with its own model, OpenRouter key, usage totals.
 
 ## How it works
 
@@ -108,8 +115,7 @@ Audio is streamed as it is spoken, so most of the transcript is already final by
 the time you stop talking. Audio itself is never written to disk.
 
 Local state lives in `~/Library/Application Support/Transcriptor`:
-`config.json`, `history.json`, `cleanup-stats.json`, and `experiments/` for the
-Experiment cleanup tier.
+`config.json` and `history.json`.
 
 ## Develop
 

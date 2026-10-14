@@ -22,10 +22,26 @@ struct StoreTests {
         #expect(String(decoding: try Data(contentsOf: configURL), as: UTF8.self) == "not json")
     }
 
+    @Test func meetingKeepsNameAndSpanAcrossReloadAndRename() throws {
+        let (store, dir) = try makeStore()
+        store.load()
+        let start = Date.now.addingTimeInterval(-3600)
+        let id = try #require(try store.recordTranscript("hello team", durationMs: 1000, title: "Standup", startedAt: start))
+        try store.recordTranscript("plain dictation", durationMs: 500)
+        store.retitle(id, "Weekly standup")
+
+        let reloaded = Store(directory: dir)
+        reloaded.load()
+        let meeting = try #require(reloaded.history.first { $0.id == id })
+        #expect(meeting.title == "Weekly standup")
+        #expect(meeting.startedAt == start.timeIntervalSince1970 * 1000)
+        #expect(reloaded.history.filter(\.isMeeting).count == 1)
+    }
+
     @Test func missingFilesAreReadable() throws {
         let (store, _) = try makeStore()
         #expect(store.load() == [])
-        #expect(store.configReadable && store.historyReadable && store.statsReadable)
+        #expect(store.configReadable && store.historyReadable)
         #expect(store.config == Config.defaults)
     }
 

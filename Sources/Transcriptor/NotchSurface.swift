@@ -4,35 +4,32 @@ import SwiftUI
 // Dynamic-island style surface: a black shape that hides inside the hardware
 // notch while idle and drops out on a spring while dictation runs. The panel
 // itself never resizes — only the shape inside it animates, which keeps every
-// frame cheap and jitter-free. A click on the island toggles the transcript
-// feed: newest sentence on top, older ones sinking below.
+// frame cheap and jitter-free. The minus button folds the island up to the
+// notch's own height, leaving only a dot on the left and a plus on the right,
+// so the screen behind stays visible.
 @MainActor
 final class NotchSurface {
-    struct Line: Identifiable, Equatable {
-        let id: Int
-        let text: String
-    }
-
     @Observable
     final class Model {
         var phase: Phase = .idle
         var tail = ""
-        var feed: [Line] = []
         var message = ""
         var level: Double = 0
         var open = false
-        var expanded = false
+        var minimized = false
         var notch = CGSize(width: 180, height: 32)
+
+        /// Messages still unfold the island: they are the one thing worth reading.
+        var compact: Bool { minimized && message.isEmpty }
     }
 
     nonisolated static let rowHeight: CGFloat = 30
-    nonisolated static let feedHeight: CGFloat = 120
-    nonisolated static let panelSize = CGSize(width: 560, height: 240)
+    nonisolated static let wing: CGFloat = 26
+    nonisolated static let panelSize = CGSize(width: 560, height: 120)
     private static let tailLength = 90
-    private static let feedLines = 6
 
     let model = Model()
-    var onTap: (() -> Void)?
+    var onMinimize: ((Bool) -> Void)?
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
 
@@ -48,6 +45,7 @@ final class NotchSurface {
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         let host = IslandHostingView(rootView: NotchContent(model: model, surface: self))
+        host.sizingOptions = [] // fixed panel: skip intrinsic-size layout passes on every transcript update
         // Only the island itself takes clicks; the menu bar around it stays live.
         host.hit = { [model] point in
             guard model.open else { return false }
@@ -62,7 +60,7 @@ final class NotchSurface {
         self.panel = panel
     }
 
-    func show(expanded: Bool) {
+    func show(minimized: Bool) {
         install()
         guard let panel else { return }
         hideTask?.cancel()
@@ -71,23 +69,22 @@ final class NotchSurface {
         model.phase = .recording
         model.message = ""
         model.tail = ""
-        model.feed = []
         model.level = 0
-        model.expanded = expanded
+        model.minimized = minimized
         model.open = false
         panel.setFrame(frame(on: screen), display: false)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
         // Start inside the notch this frame, spring out on the next.
         DispatchQueue.main.async { [model] in
-            withAnimation(Self.spring) { model.open = true }
+            withAnimation(Self.openSpring) { model.open = true }
         }
     }
 
     func idle() {
         model.phase = .idle
         model.level = 0
-        withAnimation(Self.spring) { model.open = false }
+        withAnimation(Self.closeSpring) { model.open = false }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(450))
@@ -97,25 +94,25 @@ final class NotchSurface {
     }
 
     func finishing() { model.phase = .finishing }
-    func polishing() { model.phase = .polishing }
 
-    func setExpanded(_ expanded: Bool) {
-        withAnimation(Self.spring) { model.expanded = expanded }
+    func setMinimized(_ minimized: Bool) {
+        withAnimation(minimized ? Self.closeSpring : Self.openSpring) { model.minimized = minimized }
     }
 
     func update(final: String, partial: String) {
-        let text = collapseSpaces(final + " " + partial)
+        let text = Session.collapse(final + " " + partial)
         var tail = String(text.suffix(Self.tailLength))
         if tail.count < text.count, let space = tail.firstIndex(of: " ") {
             tail = String(tail[tail.index(after: space)...]) // cut on a word, not mid-word
         }
-        model.tail = tail
-        let sentences = Self.sentences(text)
-        model.feed = sentences.enumerated().reversed().prefix(Self.feedLines).map { Line(id: $0.offset, text: $0.element) }
+        // Unchanged writes would still invalidate the views that read them.
+        if model.tail != tail { model.tail = tail }
     }
 
+    /// Quantized so near-identical levels don't re-render the dot 25 times a second.
     func level(_ rms: Float) {
-        model.level = min(1, Double(rms) * 8)
+        let level = (min(1, Double(rms) * 8) * 20).rounded() / 20
+        if model.level != level { model.level = level }
     }
 
     /// Flash the message in the open island, then retreat into the notch.
@@ -124,7 +121,7 @@ final class NotchSurface {
         model.phase = .idle
         model.level = 0
         model.message = message
-        withAnimation(Self.spring) { model.open = true }
+        withAnimation(Self.openSpring) { model.open = true }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.8))
@@ -133,33 +130,22 @@ final class NotchSurface {
         }
     }
 
-    /// Sentence boundaries: terminal punctuation followed by a space.
-    nonisolated static func sentences(_ text: String) -> [String] {
-        var out: [String] = []
-        var current = ""
-        var previous: Character = " "
-        for character in text {
-            if character == " ", ".!?…".contains(previous) {
-                out.append(current)
-                current = ""
-            } else {
-                current.append(character)
-            }
-            previous = character
-        }
-        if !current.isEmpty { out.append(current) }
-        return out
-    }
-
     /* --------------------------------- geometry -------------------------------- */
 
-    private static let spring = Animation.spring(response: 0.42, dampingFraction: 0.78)
+    // Opening overshoots a touch like the hardware island; closing is critically damped
+    // and quicker, so the shape never bounces past the notch on its way home.
+    private static var openSpring: Animation {
+        reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.78)
+    }
+    private static var closeSpring: Animation {
+        reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.3, dampingFraction: 1)
+    }
+    private static var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
     nonisolated static func size(for model: Model) -> CGSize {
         guard model.open else { return model.notch }
-        let wing: CGFloat = model.expanded ? 112 : 88
-        let height = model.notch.height + rowHeight + (model.expanded ? feedHeight + 6 : 0)
-        return CGSize(width: model.notch.width + wing * 2, height: height)
+        if model.compact { return CGSize(width: model.notch.width + wing * 2, height: model.notch.height) }
+        return CGSize(width: model.notch.width + 88 * 2, height: model.notch.height + rowHeight)
     }
 
     private func screen() -> NSScreen {
@@ -184,11 +170,6 @@ final class NotchSurface {
     }
 }
 
-private func collapseSpaces(_ text: String) -> String {
-    text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
 /// Lets clicks fall through everywhere except the island.
 private final class IslandHostingView<Content: View>: NSHostingView<Content> {
     var hit: (NSPoint) -> Bool = { _ in false }
@@ -202,129 +183,131 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
     @MainActor required dynamic init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
+// Each subview reads only the model fields it draws, so a transcript update
+// re-renders the caption, a level tick re-renders the dot, and the island
+// shape is left alone.
 private struct NotchContent: View {
     var model: NotchSurface.Model
     let surface: NotchSurface
+    @Namespace private var namespace
 
     var body: some View {
         let size = NotchSurface.size(for: model)
         ZStack(alignment: .top) {
-            IslandShape(width: size.width, height: size.height, ear: model.open ? 10 : 0)
-                .fill(.black)
-            VStack(spacing: 0) {
-                row.frame(height: NotchSurface.rowHeight)
-                if model.expanded {
-                    Feed(lines: model.feed)
-                        .frame(height: NotchSurface.feedHeight)
-                        .padding(.bottom, 6)
-                        .transition(.opacity)
+            if model.compact {
+                // Hugs the notch: the dot sits just left of it, the plus just right.
+                HStack(spacing: model.notch.width) {
+                    Dot(model: model)
+                        .matchedGeometryEffect(id: "dot", in: namespace)
+                        .padding(.trailing, 6)
+                        .frame(width: NotchSurface.wing, alignment: .trailing)
+                    Image(systemName: "plus")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .padding(.leading, 6)
+                        .frame(width: NotchSurface.wing, alignment: .leading)
                 }
+                .frame(height: model.notch.height)
+                .transition(.opacity.animation(.easeOut(duration: 0.15)))
+            } else {
+                HStack(spacing: 10) {
+                    Dot(model: model)
+                        .matchedGeometryEffect(id: "dot", in: namespace)
+                    Caption(model: model)
+                    MinimizeButton { surface.onMinimize?(true) }
+                }
+                .padding(.leading, 18)
+                .padding(.trailing, 12)
+                .frame(width: size.width, height: NotchSurface.rowHeight)
+                .offset(y: model.notch.height)
+                .transition(.opacity.animation(.easeOut(duration: 0.15)))
             }
-            .frame(width: size.width)
-            .offset(y: model.notch.height)
-            .opacity(model.open ? 1 : 0)
         }
+        .opacity(model.open ? 1 : 0)
+        .blur(radius: model.open ? 0 : 4)
         .frame(width: NotchSurface.panelSize.width, height: NotchSurface.panelSize.height, alignment: .top)
+        .background(.black)
+        // Clipping to the animated shape keeps text from spilling past the island while it shrinks.
+        .clipShape(IslandShape(width: size.width, height: size.height, ear: model.open ? 10 : 0))
         .contentShape(IslandShape(width: size.width, height: size.height, ear: 0))
-        .onTapGesture { surface.onTap?() }
-    }
-
-    private var row: some View {
-        HStack(spacing: 10) {
-            Dot(level: model.level, phase: model.phase)
-            Group {
-                if !model.message.isEmpty {
-                    Text(model.message).foregroundStyle(Dot.color(for: model.phase))
-                } else if model.expanded || model.tail.isEmpty {
-                    Text(status).foregroundStyle(.white.opacity(0.45))
-                } else {
-                    // Starts centered; once it outgrows the row the newest words pin right
-                    // and the older ones slide off into a soft fade. The overlay keeps the
-                    // row's width fixed no matter how long the text gets.
-                    Color.clear.overlay(alignment: .trailing) {
-                        HStack(spacing: 0) {
-                            Spacer(minLength: 0)
-                            Text(model.tail).foregroundStyle(.white).fixedSize()
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .clipped()
-                    .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.18)],
-                                         startPoint: .leading, endPoint: .trailing))
-                }
-            }
-            .font(.system(size: 13, weight: .medium, design: .rounded))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: model.expanded ? "chevron.up" : "chevron.down")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white.opacity(0.3))
-        }
-        .padding(.leading, 18)
-        .padding(.trailing, 18)
-    }
-
-    private var status: String {
-        switch model.phase {
-        case .polishing: "Polishing…"
-        case .finishing: "Finishing…"
-        default: "Listening…"
-        }
+        .onTapGesture { if model.compact { surface.onMinimize?(false) } }
     }
 }
 
-// Newest sentence on top, older ones sink and fade.
-private struct Feed: View {
-    let lines: [NotchSurface.Line]
+private struct MinimizeButton: View {
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-                Text(line.text)
-                    .font(.system(size: 13, weight: index == 0 ? .medium : .regular, design: .rounded))
-                    .foregroundStyle(.white.opacity(index == 0 ? 1 : max(0.25, 0.7 - Double(index) * 0.12)))
-                    .lineLimit(index == 0 ? 3 : 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.asymmetric(insertion: .move(edge: .top).combined(with: .opacity), removal: .opacity))
+        Image(systemName: "minus")
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundStyle(.white.opacity(hovering ? 0.9 : 0.35))
+            .frame(width: 22, height: 22)
+            .background(.white.opacity(hovering ? 0.14 : 0), in: Circle())
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .onTapGesture(perform: action)
+    }
+}
+
+private struct Caption: View {
+    var model: NotchSurface.Model
+
+    var body: some View {
+        Group {
+            if !model.message.isEmpty {
+                Text(model.message).foregroundStyle(Dot.color(for: model.phase))
+            } else if model.tail.isEmpty {
+                Text(status).foregroundStyle(.white.opacity(0.45))
+            } else {
+                // Starts centered; once it outgrows the row the newest words pin right
+                // and the older ones slide off into a soft fade. The overlay keeps the
+                // row's width fixed no matter how long the text gets.
+                Color.clear.overlay(alignment: .trailing) {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Text(model.tail).foregroundStyle(.white).fixedSize()
+                        Spacer(minLength: 0)
+                    }
+                }
+                .clipped()
+                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.18)],
+                                     startPoint: .leading, endPoint: .trailing))
             }
-            if lines.isEmpty {
-                Text("Your words appear here as you speak.")
-                    .font(.system(size: 13, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.3))
-            }
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 2)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: lines.map(\.id))
-        .mask(
-            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.72),
-                                   .init(color: .clear, location: 1)],
-                           startPoint: .top, endPoint: .bottom)
-        )
-        .clipped()
+        .font(.system(size: 13, weight: .medium, design: .rounded))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Status swaps (Listening → Finishing, first words, messages) crossfade.
+        .animation(.easeOut(duration: 0.18), value: model.phase)
+        .animation(.easeOut(duration: 0.18), value: model.message)
+        .animation(.easeOut(duration: 0.18), value: model.tail.isEmpty)
+    }
+
+    private var status: String {
+        model.phase == .finishing ? "Finishing…" : "Listening…"
     }
 }
 
 // Solid while recording, breathing with the voice level; dim otherwise.
 private struct Dot: View {
-    var level: Double
-    var phase: Phase
+    var model: NotchSurface.Model
 
     var body: some View {
         Circle()
-            .fill(Self.color(for: phase))
+            .fill(Self.color(for: model.phase))
             .frame(width: 7, height: 7)
-            .scaleEffect(1 + level * 0.6)
-            .animation(.linear(duration: 0.06), value: level)
-            .animation(.easeOut(duration: 0.25), value: phase)
+            .scaleEffect(1 + model.level * 0.6)
+            // A spring retargets with its velocity intact, so 25 Hz level ticks read as one fluid motion.
+            .animation(.spring(response: 0.18, dampingFraction: 0.7), value: model.level)
+            .animation(.easeOut(duration: 0.25), value: model.phase)
     }
 
     static func color(for phase: Phase) -> Color {
         switch phase {
         case .recording: .red
         case .finishing: .orange
-        case .polishing: .blue
         case .idle: .white.opacity(0.4)
         }
     }

@@ -12,7 +12,6 @@ struct ConfigTests {
         let config = try decode(#"{"hotkey":"Control+K","apiKeyEnc":"aabb","openrouterKeyEnc":"ccdd","trigger":"DoubleCommand"}"#)
         #expect(config.hotkey == "Control+K")
         #expect(config.apiKey == "")
-        #expect(config.openrouterKey == "")
     }
 
     @Test func missingKeysGetDefaults() throws {
@@ -31,13 +30,16 @@ struct ConfigTests {
     @Test func encodingOmitsApiKeys() throws {
         var config = Config.defaults
         config.apiKey = "secret"
-        config.openrouterKey = "secret2"
         let data = try JSONEncoder().encode(config)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         #expect(object?["apiKey"] == nil)
-        #expect(object?["openrouterKey"] == nil)
         #expect(object?["hotkey"] as? String == "Option+Space")
         // round-trip preserves everything else
         #expect(try JSONDecoder().decode(Config.self, from: data) == Config.defaults)
+    }
+
+    @Test func retiredKeysAreIgnored() throws {
+        let config = try decode(#"{"cleanupEnabled":true,"emailEnabled":true,"cuEnabled":true,"cuBrainModel":"x"}"#)
+        #expect(config == Config.defaults)
     }
 }

@@ -8,13 +8,21 @@ struct HistoryEntry: Codable {
     var at = 0.0
     var durationMs: Double?
     var words: Int?
+    // Meetings only: their name and when recording began (`at` is when it ended).
+    var title: String?
+    var startedAt: Double?
 
-    init(id: String, text: String, at: Double, durationMs: Double?, words: Int?) {
+    var isMeeting: Bool { title != nil }
+
+    init(id: String, text: String, at: Double, durationMs: Double?, words: Int?,
+         title: String? = nil, startedAt: Double? = nil) {
         self.id = id
         self.text = text
         self.at = at
         self.durationMs = durationMs
         self.words = words
+        self.title = title
+        self.startedAt = startedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -24,14 +32,7 @@ struct HistoryEntry: Codable {
         at = try c.decode(Double.self, forKey: .at)
         durationMs = try c.decodeIfPresent(Double.self, forKey: .durationMs)
         words = try c.decodeIfPresent(Int.self, forKey: .words)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        startedAt = try c.decodeIfPresent(Double.self, forKey: .startedAt)
     }
-}
-
-struct CleanupStats: Codable {
-    var count = 0
-    var promptTokens = 0
-    var completionTokens = 0
-    var costUsd = 0.0
-    var emailCount = 0
-    var emailCostUsd = 0.0
 }

@@ -45,8 +45,7 @@ final class Session {
                 guard let self, self.generation == generation else { return }
                 switch event {
                 case .final(let text):
-                    self.finalText += text
-                    self.onTranscript?(self.finalText, self.partialText)
+                    self.finalText += text // the partial that closes every message repaints once
                 case .partial(let text):
                     self.partialText = text
                     self.onTranscript?(self.finalText, self.partialText)

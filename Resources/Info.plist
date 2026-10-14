@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.0</string>
+	<string>2.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -26,6 +26,8 @@
 	<string>26.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Transcriptor needs the microphone to transcribe your speech.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Transcriptor records the other side of a call when you transcribe a meeting.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSHighResolutionCapable</key>

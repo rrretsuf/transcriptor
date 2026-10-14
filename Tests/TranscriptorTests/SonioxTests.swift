@@ -36,6 +36,9 @@ struct SonioxTests {
         #expect(SonioxClient.keepToken(end, translateTo: "") == false)
         #expect(SonioxClient.keepToken(end, translateTo: "en") == false)
         #expect(SonioxClient.keepToken(Token(text: "hi", is_final: true), translateTo: "") == true)
+        for kept in ["<>", "<a>b>", "a<b>", " <end>"] {
+            #expect(SonioxClient.keepToken(Token(text: kept, is_final: true), translateTo: "") == true)
+        }
     }
 
     @Test func translationKeepsOnlyTranslatedTokens() {

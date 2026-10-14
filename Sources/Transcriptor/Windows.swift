@@ -40,7 +40,6 @@ struct SettingsView: View {
         TabView {
             Tab("General", systemImage: "gearshape") { general }
             Tab("Dictation", systemImage: "waveform") { dictation }
-            Tab("AI", systemImage: "sparkles") { ai }
         }
         .frame(width: 540, height: 600)
         .onDisappear { state.store.flushConfig() }
@@ -50,7 +49,7 @@ struct SettingsView: View {
         Form {
             Section {
                 HotkeyRecorder(hotkey: binding(state, \.hotkey) { state.registerHotkey() })
-                LabeledContent("Email Hotkey", value: Hotkeys.display(AppState.emailHotkey))
+                LabeledContent("Cancel Recording", value: Hotkeys.display(AppState.cancelHotkey))
                 Toggle("Launch at Login", isOn: binding(state, \.launchAtLogin) {
                     if state.config.launchAtLogin { try? SMAppService.mainApp.register() }
                     else { try? SMAppService.mainApp.unregister() }
@@ -58,9 +57,8 @@ struct SettingsView: View {
             }
             Section {
                 KeyField(label: "Soniox", account: Keychain.Account.soniox) { state.forgetKey() }
-                KeyField(label: "OpenRouter", account: Keychain.Account.openrouter) {}
             } header: {
-                Text("API Keys")
+                Text("API Key")
             } footer: {
                 Text("Stored in your Keychain, never in a file.")
             }
@@ -114,93 +112,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var ai: some View {
-        Form {
-            Section {
-                Toggle("Clean Up Transcripts", isOn: binding(state, \.cleanupEnabled))
-                if state.config.cleanupEnabled {
-                    GlassSegments(selection: binding(state, \.cleanupTier), options: [
-                        ("light", "Light"), ("medium", "Medium"), ("hard", "Hard"), ("exp", "Experiment"),
-                    ])
-                    TextField("Model", text: binding(state, \.cleanupModel))
-                    TextField("Provider", text: binding(state, \.cleanupProvider))
-                    if state.config.cleanupTier == "exp" {
-                        TextField("Experiment Models", text: binding(state, \.experimentModels),
-                                  prompt: Text("model @ provider, one per line"), axis: .vertical)
-                            .lineLimit(3...8)
-                            .font(.callout.monospaced())
-                        LabeledContent("Outputs") {
-                            Button("Open Experiments Folder") {
-                                try? FileManager.default.createDirectory(at: Polish.experimentsFolder, withIntermediateDirectories: true)
-                                NSWorkspace.shared.open(Polish.experimentsFolder)
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("Cleanup")
-            } footer: {
-                Text(tierHint)
-            }
-            Section {
-                Toggle("Email Mode", isOn: binding(state, \.emailEnabled))
-                if state.config.emailEnabled {
-                    TextField("Model", text: binding(state, \.emailModel))
-                    TextField("Provider", text: binding(state, \.emailProvider))
-                }
-            } header: {
-                Text("Email")
-            } footer: {
-                Text("\(Hotkeys.display(AppState.emailHotkey)) dictates straight into a structured email.")
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    private var tierHint: String {
-        switch state.config.cleanupTier {
-        case "light": "Light removes filler words and fixes punctuation."
-        case "medium": "Medium also restructures sentences and paragraphs."
-        case "hard": "Hard rewrites the text for reuse as instructions."
-        case "exp": "Experiment pastes the raw text instantly and runs every listed model in the background."
-        default: ""
-        }
-    }
-}
-
-/// Liquid-glass segmented control: the selection slides between labels on a spring.
-private struct GlassSegments: View {
-    @Binding var selection: String
-    let options: [(tag: String, label: String)]
-    @Namespace private var namespace
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.tag) { option in
-                let selected = option.tag == selection
-                Text(option.label)
-                    .font(.callout.weight(selected ? .semibold : .medium))
-                    .foregroundStyle(selected ? .primary : .secondary)
-                    .padding(.vertical, 7)
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        if selected {
-                            Color.clear
-                                .glassEffect(.regular.tint(.accentColor.opacity(0.35)).interactive(), in: .capsule)
-                                .matchedGeometryEffect(id: "selection", in: namespace)
-                        }
-                    }
-                    .contentShape(.capsule)
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selection = option.tag }
-                    }
-            }
-        }
-        .padding(3)
-        .background(.quaternary.opacity(0.6), in: Capsule())
-        .padding(.vertical, 2)
     }
 }
 
@@ -333,13 +244,12 @@ private struct LanguagesRow: View {
     }
 }
 
-/// Everything the local history and cleanup stats can tell.
+/// Everything the local history can tell.
 private struct UsageGrid: View {
     let state: AppState
 
     var body: some View {
         let history = state.store.history
-        let stats = state.store.stats
         let words = history.reduce(0) { $0 + ($1.words ?? 0) }
         let seconds = history.reduce(0.0) { $0 + ($1.durationMs ?? 0) } / 1000
         let today = history.filter { Calendar.current.isDateInToday(Date(timeIntervalSince1970: $0.at / 1000)) }.count
@@ -354,10 +264,6 @@ private struct UsageGrid: View {
             // Soniox real-time list price: $0.12 per streamed hour (soniox.com/pricing).
             StatTile(value: (seconds / 3600 * 0.12).formatted(.currency(code: "USD").precision(.fractionLength(2))),
                      label: "Soniox spend (est.)")
-            StatTile(value: stats.count.formatted(), label: "AI cleanups")
-            StatTile(value: stats.emailCount.formatted(), label: "Emails")
-            StatTile(value: (stats.costUsd + stats.emailCostUsd).formatted(.currency(code: "USD").precision(.fractionLength(2))),
-                     label: "AI spend")
         }
         .padding(.vertical, 4)
     }
@@ -389,11 +295,17 @@ private struct StatTile: View {
 struct HistoryView: View {
     let state: AppState
     @State private var query = ""
+    @State private var meetingsOnly = false
 
     var body: some View {
+        let filtered = filtered // evaluated once per render, not once per branch
         NavigationStack {
             Group {
-                if state.store.history.isEmpty {
+                if meetingsOnly && !state.store.history.contains(where: \.isMeeting) {
+                    ContentUnavailableView("No Meetings",
+                                           systemImage: "record.circle",
+                                           description: Text("Start one from the menu bar: Start Meeting Transcription."))
+                } else if state.store.history.isEmpty {
                     ContentUnavailableView("No Transcriptions",
                                            systemImage: "waveform",
                                            description: Text("Press \(Hotkeys.display(state.config.hotkey)) and start talking."))
@@ -410,13 +322,25 @@ struct HistoryView: View {
             }
             .navigationTitle("Transcriptions")
             .searchable(text: $query, prompt: "Search")
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("Show", selection: $meetingsOnly.animation(.snappy)) {
+                        Text("All").tag(false)
+                        Text("Meetings").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+            }
         }
     }
 
     private var filtered: [HistoryEntry] {
-        let all = state.store.history
+        let all = meetingsOnly ? state.store.history.filter(\.isMeeting) : state.store.history
         guard !query.isEmpty else { return all }
-        return all.filter { $0.text.localizedCaseInsensitiveContains(query) }
+        return all.filter {
+            $0.text.localizedCaseInsensitiveContains(query) || $0.title?.localizedCaseInsensitiveContains(query) == true
+        }
     }
 
     private func delete(_ entry: HistoryEntry) {
@@ -424,6 +348,15 @@ struct HistoryView: View {
             try? state.store.saveHistory(state.store.history.filter { $0.id != entry.id })
         }
         if state.store.lastTranscript == entry.text { state.store.lastTranscript = "" }
+    }
+}
+
+private struct MeetingLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.foregroundStyle(.red).font(.caption)
+            configuration.title.lineLimit(1)
+        }
     }
 }
 
@@ -438,11 +371,21 @@ private struct HistoryRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
+                if let title = entry.title {
+                    Label(title, systemImage: "record.circle")
+                        .font(.headline)
+                        .labelStyle(MeetingLabel())
+                }
                 Text(entry.text)
-                    .lineLimit(4)
+                    .lineLimit(entry.isMeeting ? 3 : 4)
+                    .foregroundStyle(entry.isMeeting ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
-                    Text(Date(timeIntervalSince1970: entry.at / 1000), format: .dateTime.month().day().hour().minute())
+                    if let start = entry.startedAt {
+                        Text(meetingSpan(Date(timeIntervalSince1970: start / 1000), Date(timeIntervalSince1970: entry.at / 1000)))
+                    } else {
+                        Text(Date(timeIntervalSince1970: entry.at / 1000), format: .dateTime.month().day().hour().minute())
+                    }
                     if let words = entry.words { Text("·"); Text("\(words) words") }
                     if let ms = entry.durationMs {
                         Text("·")

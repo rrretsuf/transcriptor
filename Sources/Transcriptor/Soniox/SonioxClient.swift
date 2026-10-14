@@ -27,6 +27,7 @@ final class SonioxClient {
     private var inFlight = 0
     private var finalized = false
     private var translateTo = ""
+    private let decoder = JSONDecoder()
 
     private var openTask: Task<Void, Never>?
     private var receiveTask: Task<Void, Never>?
@@ -134,17 +135,17 @@ final class SonioxClient {
     }
 
     private func handle(_ data: Data) {
-        guard let message = try? JSONDecoder().decode(Incoming.self, from: data) else { return }
+        guard let message = try? decoder.decode(Incoming.self, from: data) else { return }
         if let code = message.error_code {
             fail(message.error_message ?? "Soniox error \(code.value)")
             return
         }
         if let tokens = message.tokens {
-            var pending = ""
+            var final = "", pending = ""
             for token in tokens where Self.keepToken(token, translateTo: translateTo) {
-                if token.is_final { continuation?.yield(.final(token.text)) }
-                else { pending += token.text }
+                if token.is_final { final += token.text } else { pending += token.text }
             }
+            if !final.isEmpty { continuation?.yield(.final(final)) }
             continuation?.yield(.partial(pending))
         }
         if message.finished == true {
@@ -242,7 +243,8 @@ final class SonioxClient {
     /// pill.js keepToken: drop "<end>"-style specials; when translating, only
     /// translated tokens are kept.
     nonisolated static func keepToken(_ token: Incoming.Token, translateTo: String) -> Bool {
-        if token.text.range(of: #"^<[^>]+>$"#, options: .regularExpression) != nil { return false }
+        let text = token.text
+        if text.count > 2, text.first == "<", text.last == ">", !text.dropFirst().dropLast().contains(">") { return false }
         if translateTo.isEmpty { return true }
         return token.translation_status == "translation"
     }

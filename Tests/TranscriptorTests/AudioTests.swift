@@ -2,14 +2,6 @@ import Foundation
 import Testing
 @testable import Transcriptor
 
-struct FeedTests {
-    @Test func splitsSentencesAtTerminalPunctuation() {
-        #expect(NotchSurface.sentences("Hello there. How are you? Fine") == ["Hello there.", "How are you?", "Fine"])
-        #expect(NotchSurface.sentences("Version 2.5 works") == ["Version 2.5 works"])
-        #expect(NotchSurface.sentences("") == [])
-    }
-}
-
 struct PCMChunkerTests {
     private func feed(_ chunker: inout PCMChunker, _ samples: [Float]) -> [(pcm: Data, rms: Float)] {
         samples.withUnsafeBufferPointer { chunker.feed($0) }

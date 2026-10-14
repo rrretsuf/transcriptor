@@ -4,27 +4,31 @@ import Foundation
 
 // Global so other types (NotchSurface, tests) can use them without inheriting
 // the AppState actor isolation.
-enum Phase { case idle, recording, finishing, polishing }
-enum SessionMode { case dictate, email }
+enum Phase { case idle, recording, finishing }
 
 @MainActor @Observable
 final class AppState {
-    static let emailHotkey = "Command+Shift+E"
+    static let cancelHotkey = "Option+X"
 
     private(set) var state = Phase.idle
-    private(set) var sessionMode = SessionMode.dictate
-    private(set) var sessionId = 0
 
     let store = Store()
     let hotkeys = Hotkeys()
     let surface = NotchSurface()
     let tapWatcher = TapWatcher()
+    let files: FileTranscription
+    let meeting: Meeting
     private let mic = MicCapture()
     private var session: Session?
     private var starting = false
     private var apiKey: String? // lazily read from Keychain on first dictation
 
     var config: Config { store.config }
+
+    init() {
+        files = FileTranscription(store: store)
+        meeting = Meeting(store: store)
+    }
 
     func forgetKey() { apiKey = nil }
 
@@ -36,23 +40,19 @@ final class AppState {
         openSettings?()
     }
 
-    /// Island click: show the running transcript feed under the notch, remembered.
-    func toggleNotchExpanded() {
+    /// Island minus / plus: fold the island down to the notch's height, remembered.
+    func setNotchMinimized(_ minimized: Bool) {
         var next = config
-        next.notchExpanded.toggle()
+        next.notchMinimized = minimized
         store.stage(next)
-        surface.setExpanded(next.notchExpanded)
+        surface.setMinimized(minimized)
     }
 
     /* ---------------------------------- hotkeys --------------------------------- */
 
     func registerHotkey() {
         hotkeys.unregisterAll()
-        if state != .idle { registerEscape() }
-        if config.emailEnabled && config.hotkey != Self.emailHotkey
-            && !hotkeys.register(Self.emailHotkey, handler: { [weak self] in self?.startEmail() }) {
-            notify("Email hotkey unavailable", "\(Self.emailHotkey) is already taken by another app.")
-        }
+        if state != .idle { registerCancelKeys() }
         applyTapWatcher()
         if Hotkeys.parseTap(config.hotkey) != nil { return }
         if !hotkeys.register(config.hotkey, handler: { [weak self] in self?.toggle() }) {
@@ -71,8 +71,15 @@ final class AppState {
         tapWatcher.start()
     }
 
-    private func registerEscape() {
+    /// Escape cancels any phase; Option+X only while recording, so it never swallows typing otherwise.
+    private func registerCancelKeys() {
         _ = hotkeys.register("Escape") { [weak self] in self?.cancel() }
+        if state == .recording { _ = hotkeys.register(Self.cancelHotkey) { [weak self] in self?.cancel() } }
+    }
+
+    private func unregisterCancelKeys() {
+        hotkeys.unregister("Escape")
+        hotkeys.unregister(Self.cancelHotkey)
     }
 
     /* --------------------------------- sessions --------------------------------- */
@@ -80,18 +87,6 @@ final class AppState {
     func toggle() {
         if state == .recording { return stop() }
         guard state == .idle, !starting else { return }
-        sessionMode = .dictate
-        beginSession()
-    }
-
-    func startEmail() {
-        if state == .recording { return stop() }
-        guard state == .idle, !starting else { return }
-        guard config.emailEnabled else {
-            notify("Email dictation is off", "Turn it on in Settings to dictate emails with ⌘⇧E.")
-            return
-        }
-        sessionMode = .email
         beginSession()
     }
 
@@ -115,14 +110,13 @@ final class AppState {
         }
         // The island opens on this very frame; mic and socket catch up behind it.
         starting = true
-        sessionId += 1
-        setState(.recording)
-        surface.show(expanded: config.notchExpanded)
+        state = .recording
+        surface.show(minimized: config.notchMinimized)
         Task {
             defer { starting = false }
             if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
                 guard await AVCaptureDevice.requestAccess(for: .audio) else {
-                    setState(.idle)
+                    state = .idle
                     surface.fail("Microphone access is off")
                     notify("Microphone blocked", "Allow microphone access in System Settings › Privacy.")
                     return
@@ -142,9 +136,9 @@ final class AppState {
             do {
                 try session.start(config: config, apiKey: apiKey)
                 self.session = session
-                registerEscape()
+                registerCancelKeys()
             } catch {
-                setState(.idle)
+                state = .idle
                 surface.fail("Microphone unavailable")
                 notify("Could not start dictation", error.localizedDescription)
             }
@@ -154,17 +148,18 @@ final class AppState {
     func stop() {
         guard state == .recording else { return }
         guard let session else { return cancel() } // stopped before the mic was up
-        setState(.finishing)
+        hotkeys.unregister(Self.cancelHotkey)
+        state = .finishing
         surface.finishing()
         session.stop()
     }
 
     func cancel() {
         guard state != .idle else { return }
-        hotkeys.unregister("Escape")
+        unregisterCancelKeys()
         session?.cancel()
         session = nil
-        setState(.idle)
+        state = .idle
         surface.idle()
     }
 
@@ -172,79 +167,22 @@ final class AppState {
 
     func handleResult(text: String, durationMs: Double) {
         guard state != .idle else { return }
-        hotkeys.unregister("Escape")
+        unregisterCancelKeys()
         session = nil
+        state = .idle
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else {
-            setState(.idle)
-            surface.fail("No speech detected")
-            return
-        }
-        let mode = sessionMode
-        let openrouterKey = Keychain.get(Keychain.Account.openrouter) ?? ""
-        let wanted = mode == .email
-            ? Polish.emailWanted(clean, config: config, openrouterKey: openrouterKey)
-            : Polish.cleanupWanted(clean, config: config, openrouterKey: openrouterKey)
-        guard wanted else {
-            surface.idle()
-            setState(.idle)
-            recordAndPaste(clean, durationMs: durationMs)
-            // "exp" tier: raw text pastes instantly while models clean in the background.
-            if mode != .email, Polish.experimentWanted(clean, config: config, openrouterKey: openrouterKey) {
-                Task { await Polish.experiment(clean, config: config, openrouterKey: openrouterKey) }
-            }
-            return
-        }
-        // AI path: the notch stays visible in a loading state until the
-        // polished text (or the original, on failure) is pasted.
-        setState(.polishing)
-        surface.polishing()
-        let polishingId = sessionId
-        Task { [config] in
-            let outcome = mode == .email
-                ? await Polish.email(clean, config: config, openrouterKey: openrouterKey)
-                : await Polish.cleanup(clean, config: config, openrouterKey: openrouterKey)
-            guard self.sessionId == polishingId, self.state == .polishing else { return }
-            if outcome.ok, let usage = outcome.usage { self.recordUsage(usage, mode: mode) }
-            if !outcome.ok {
-                switch outcome.reason {
-                case "HTTP 401", "HTTP 402", "HTTP 403":
-                    notify(mode == .email ? "Email skipped" : "Cleanup skipped",
-                           "Your OpenRouter key was rejected. The original transcription was pasted.")
-                default:
-                    if mode == .email {
-                        notify("Email not structured",
-                               "The email model failed (\(outcome.reason)). The original transcription was pasted.")
-                    }
-                }
-            }
-            surface.idle()
-            setState(.idle)
-            let final = outcome.ok && !outcome.text.isEmpty ? outcome.text : clean
-            self.recordAndPaste(final, durationMs: durationMs)
-        }
+        guard !clean.isEmpty else { return surface.fail("No speech detected") }
+        surface.idle()
+        recordAndPaste(clean, durationMs: durationMs)
     }
 
+    /// Paste first: the history write is disk I/O the user shouldn't wait on.
     private func recordAndPaste(_ text: String, durationMs: Double) {
+        Paste.pasteAtCursor(text, autoPaste: config.autoPaste, restoreClipboard: config.restoreClipboard)
         do {
             try store.recordTranscript(text, durationMs: durationMs)
         } catch {
             notify("History could not be saved", "Your transcription is still available on the clipboard.")
-        }
-        Paste.pasteAtCursor(text, autoPaste: config.autoPaste, restoreClipboard: config.restoreClipboard)
-    }
-
-    private func recordUsage(_ usage: Polish.Usage, mode: SessionMode) {
-        store.recordCleanup { stats in
-            if mode == .email {
-                stats.emailCount += 1
-                stats.emailCostUsd += usage.costUsd ?? 0
-            } else {
-                stats.count += 1
-                stats.promptTokens += usage.promptTokens ?? 0
-                stats.completionTokens += usage.completionTokens ?? 0
-                stats.costUsd += usage.costUsd ?? 0
-            }
         }
     }
 
@@ -253,9 +191,9 @@ final class AppState {
     /// banner only appears when there is nothing to paste.
     func handleError(message: String, text: String, durationMs: Double) {
         guard state != .idle else { return }
-        hotkeys.unregister("Escape")
+        unregisterCancelKeys()
         session = nil
-        setState(.idle)
+        state = .idle
         let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if clean.isEmpty {
             surface.fail(message)
@@ -264,10 +202,5 @@ final class AppState {
             surface.fail("Connection lost — partial text pasted")
             recordAndPaste(clean, durationMs: durationMs)
         }
-    }
-
-    private func setState(_ next: Phase) {
-        state = next
-        if next == .idle { sessionMode = .dictate }
     }
 }

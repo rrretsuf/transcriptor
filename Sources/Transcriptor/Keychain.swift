@@ -6,7 +6,6 @@ enum Keychain {
 
     enum Account {
         static let soniox = "soniox"
-        static let openrouter = "openrouter"
     }
 
     static func get(_ account: String) -> String? {

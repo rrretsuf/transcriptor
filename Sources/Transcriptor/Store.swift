@@ -5,10 +5,8 @@ final class Store {
     let directory: URL
     private(set) var config = Config.defaults
     private(set) var history: [HistoryEntry] = []
-    private(set) var stats = CleanupStats()
     private(set) var configReadable = true
     private(set) var historyReadable = true
-    private(set) var statsReadable = true
     var lastTranscript = ""
     private var persistTask: Task<Void, Never>?
 
@@ -21,10 +19,10 @@ final class Store {
     private func path(_ name: String) -> URL { directory.appending(component: name) }
 
     private func writeJSON(_ url: URL, _ value: some Encodable) throws {
-        let data = try JSONEncoder().encode(value)
-        let pretty = try JSONSerialization.data(withJSONObject: JSONSerialization.jsonObject(with: data), options: [.prettyPrinted, .sortedKeys])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let tmp = url.appendingPathExtension("tmp")
-        try pretty.write(to: tmp, options: .atomic)
+        try encoder.encode(value).write(to: tmp, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
         if FileManager.default.fileExists(atPath: url.path) {
             _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
@@ -62,8 +60,6 @@ final class Store {
             historyReadable = isMissing(error)
             if !historyReadable { unreadable.append("history") }
         }
-        do { stats = try read(path("cleanup-stats.json"), as: CleanupStats.self) }
-        catch { statsReadable = isMissing(error) }
         return unreadable
     }
 
@@ -71,7 +67,6 @@ final class Store {
         guard configReadable else { throw SaveError.unreadable("Settings file could not be read. It has not been overwritten.") }
         var out = next ?? config
         out.apiKey = ""
-        out.openrouterKey = ""
         try writeJSON(path("config.json"), out)
         if let next { config = next }
     }
@@ -85,16 +80,6 @@ final class Store {
         guard historyReadable else { throw SaveError.unreadable("History file could not be read. It has not been overwritten.") }
         try writeJSON(path("history.json"), next)
         history = next
-    }
-
-    func saveStats() throws {
-        guard statsReadable else { return }
-        try writeJSON(path("cleanup-stats.json"), stats)
-    }
-
-    func recordCleanup(_ mutate: (inout CleanupStats) -> Void) {
-        mutate(&stats)
-        try? saveStats()
     }
 
     /// Settings edits: update memory now, write to disk once typing settles.
@@ -119,17 +104,30 @@ final class Store {
         do { try saveConfig() } catch { notify("Settings not saved", error.localizedDescription) }
     }
 
-    func recordTranscript(_ text: String, durationMs: Double?) throws {
+    /// Returns the new entry's id, or nil when history is off.
+    @discardableResult
+    func recordTranscript(_ text: String, durationMs: Double?,
+                          title: String? = nil, startedAt: Date? = nil) throws -> String? {
         lastTranscript = text
-        guard config.saveHistory else { return }
+        guard config.saveHistory else { return nil }
         let entry = HistoryEntry(
             id: UUID().uuidString.lowercased(),
             text: text,
             at: Date.now.timeIntervalSince1970 * 1000,
             durationMs: durationMs,
-            words: text.split(whereSeparator: { $0.isWhitespace }).count
+            words: text.split(whereSeparator: { $0.isWhitespace }).count,
+            title: title,
+            startedAt: startedAt.map { $0.timeIntervalSince1970 * 1000 }
         )
         try saveHistory(Array(([entry] + history).prefix(historyLimit)))
+        return entry.id
+    }
+
+    func retitle(_ id: String, _ title: String) {
+        guard let index = history.firstIndex(where: { $0.id == id }), history[index].title != title else { return }
+        var next = history
+        next[index].title = title
+        try? saveHistory(next)
     }
 
     enum SaveError: LocalizedError {

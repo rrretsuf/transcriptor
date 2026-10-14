@@ -21,6 +21,18 @@ struct TranscriptorApp: App {
             HistoryView(state: delegate.appState)
         }
         .defaultSize(width: 560, height: 640)
+
+        Window("Transcribe File", id: "file") {
+            FileView(files: delegate.appState.files)
+        }
+        .defaultSize(width: 520, height: 460)
+        .restorationBehavior(.disabled)
+
+        Window("Meeting", id: "meeting") {
+            MeetingView(meeting: delegate.appState.meeting)
+        }
+        .defaultSize(width: 520, height: 560)
+        .restorationBehavior(.disabled)
     }
 
 }
@@ -32,7 +44,7 @@ private struct TrayLabel: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        Image(nsImage: Self.trayImage(active: state.state != .idle))
+        Image(nsImage: Self.trayImage(active: state.state != .idle || state.meeting.status == .recording))
             .onAppear { state.openSettings = { openSettings() } }
     }
 
@@ -64,16 +76,22 @@ private struct MenuContent: View {
 
     var body: some View {
         Button("\(firstItemLabel)  \(Hotkeys.display(state.config.hotkey))") { state.toggle() }
-            .disabled(state.state == .finishing || state.state == .polishing)
+            .disabled(state.state == .finishing)
         Button("Copy Last Transcription") {
             _ = Paste.writeClipboard(state.store.lastTranscript)
         }
         .disabled(state.store.lastTranscript.isEmpty)
         Divider()
-        Button("All Transcriptions…") {
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "history")
+        Button("Transcribe File…") { open("file") }
+        Button(state.meeting.isActive ? "Show Meeting" : "Start Meeting Transcription") {
+            if !state.meeting.isActive {
+                state.meeting.reset()
+                state.meeting.start()
+            }
+            open("meeting")
         }
+        Divider()
+        Button("All Transcriptions…") { open("history") }
         Button("Settings…") { state.showSettings() }
             .keyboardShortcut(",", modifiers: .command)
         Divider()
@@ -81,11 +99,16 @@ private struct MenuContent: View {
             .keyboardShortcut("q", modifiers: .command)
     }
 
+    /// Agent apps must activate before a window can come forward.
+    private func open(_ id: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: id)
+    }
+
     private var firstItemLabel: String {
         switch state.state {
-        case .recording: state.sessionMode == .email ? "Stop Email" : "Stop Dictation"
+        case .recording: "Stop Dictation"
         case .finishing: "Finishing…"
-        case .polishing: "Polishing…"
         case .idle: "Start Dictation"
         }
     }
@@ -116,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.registerHotkey()
         // Paint the island once (invisible, inside the notch) so the first session is instant.
         appState.surface.install()
-        appState.surface.onTap = { [appState] in appState.toggleNotchExpanded() }
+        appState.surface.onMinimize = { [appState] in appState.setNotchMinimized($0) }
         // Warm mic, key and TLS shortly after launch so the first hotkey is as fast as the tenth.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [appState] in
             appState.prepare()
