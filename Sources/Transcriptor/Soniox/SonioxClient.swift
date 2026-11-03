@@ -27,6 +27,7 @@ final class SonioxClient {
     private var inFlight = 0
     private var finalized = false
     private var translateTo = ""
+    private var lastSpeaker: String?
     private let decoder = JSONDecoder()
 
     private var openTask: Task<Void, Never>?
@@ -142,8 +143,15 @@ final class SonioxClient {
         }
         if let tokens = message.tokens {
             var final = "", pending = ""
+            var speaker = lastSpeaker
             for token in tokens where Self.keepToken(token, translateTo: translateTo) {
-                if token.is_final { final += token.text } else { pending += token.text }
+                let text = Self.speakerMark(token.speaker, after: &speaker) + token.text
+                if token.is_final {
+                    final += text
+                    lastSpeaker = speaker
+                } else {
+                    pending += text
+                }
             }
             if !final.isEmpty { continuation?.yield(.final(final)) }
             continuation?.yield(.partial(pending))
@@ -193,24 +201,31 @@ final class SonioxClient {
         var sample_rate = 16000
         var num_channels = 1
         var enable_endpoint_detection = true
+        var enable_speaker_diarization: Bool?
         var language_hints: [String]?
         var context: Context?
         var translation: Translation?
 
-        struct Context: Encodable { var terms: [String] }
+        struct Context: Encodable {
+            var terms: [String]?
+            var text: String?
+
+            /// nil when there is nothing to tell Soniox.
+            init?(terms: [String], text: String = "") {
+                let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !terms.isEmpty || !text.isEmpty else { return nil }
+                self.terms = terms.isEmpty ? nil : terms
+                self.text = text.isEmpty ? nil : text
+            }
+        }
         struct Translation: Encodable { var type = "one_way"; var target_language: String }
     }
 
     nonisolated static func configMessage(apiKey: String, config: Config) -> ConfigMessage {
         var message = ConfigMessage(api_key: apiKey, model: config.model)
         if !config.languageHints.isEmpty { message.language_hints = config.languageHints }
-        if !config.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let terms = config.context
-                .split(whereSeparator: { $0 == "," || $0 == "\n" })
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            message.context = .init(terms: terms)
-        }
+        if config.labelSpeakers { message.enable_speaker_diarization = true }
+        message.context = .init(terms: config.terms, text: config.precedingText)
         if !config.translateTo.isEmpty {
             message.translation = .init(target_language: config.translateTo)
         }
@@ -233,11 +248,20 @@ final class SonioxClient {
             var text = ""
             var is_final = false
             var translation_status: String?
+            var speaker: String?
         }
         var tokens: [Token]?
         var finished: Bool?
         var error_code: FlexibleCode?
         var error_message: String?
+    }
+
+    /// A new paragraph with "Speaker N:" wherever the voice changes. Soniox only
+    /// sends speakers when diarization is on, so dictation never gets a label.
+    nonisolated static func speakerMark(_ speaker: String?, after last: inout String?) -> String {
+        guard let speaker, speaker != last else { return "" }
+        last = speaker
+        return "\n\nSpeaker \(speaker): "
     }
 
     /// pill.js keepToken: drop "<end>"-style specials; when translating, only

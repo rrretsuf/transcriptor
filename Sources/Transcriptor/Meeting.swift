@@ -88,6 +88,7 @@ final class Meeting {
         }
         var config = store.config
         config.silenceStopMs = 0 // meetings have long silences; only End stops them
+        config.labelSpeakers = true
         // A fresh capture per segment: the previous one may still be finishing,
         // and its teardown must not stop this one's microphone.
         let session = Session(mic: MicCapture(systemAudio: SystemAudio()))
@@ -149,7 +150,8 @@ final class Meeting {
                                               title: displayTitle, startedAt: startedAt)
     }
 
+    /// Every segment opens with its own "Speaker N:", so each starts a paragraph.
     private static func join(_ a: String, _ b: String) -> String {
-        a.isEmpty ? b : b.isEmpty ? a : a + " " + b
+        a.isEmpty ? b : b.isEmpty ? a : a + "\n\n" + b
     }
 }

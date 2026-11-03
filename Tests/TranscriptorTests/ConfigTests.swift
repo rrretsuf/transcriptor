@@ -17,8 +17,15 @@ struct ConfigTests {
     @Test func missingKeysGetDefaults() throws {
         let config = try decode("{}")
         #expect(config == Config.defaults)
-        #expect(config.model == "stt-rt-v5")
+        #expect(config.model == "stt-rt-v6")
         #expect(config.languageHints == ["en"])
+        #expect(config.cursorContext == true)
+    }
+
+    @Test func termsSplitOnCommasAndLines() {
+        var config = Config.defaults
+        config.context = " ENKI, SOMA44 ,\nHONED,, "
+        #expect(config.terms == ["ENKI", "SOMA44", "HONED"])
     }
 
     @Test func typeMismatchThrows() {
@@ -30,9 +37,14 @@ struct ConfigTests {
     @Test func encodingOmitsApiKeys() throws {
         var config = Config.defaults
         config.apiKey = "secret"
+        config.precedingText = "private draft"
+        config.labelSpeakers = true
         let data = try JSONEncoder().encode(config)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         #expect(object?["apiKey"] == nil)
+        #expect(object?["precedingText"] == nil)
+        #expect(object?["labelSpeakers"] == nil)
+        #expect(object?["cursorContext"] as? Bool == true)
         #expect(object?["hotkey"] as? String == "Option+Space")
         // round-trip preserves everything else
         #expect(try JSONDecoder().decode(Config.self, from: data) == Config.defaults)

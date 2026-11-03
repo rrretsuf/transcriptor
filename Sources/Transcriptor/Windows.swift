@@ -73,9 +73,9 @@ struct SettingsView: View {
         Form {
             Section {
                 Picker("Model", selection: binding(state, \.model)) {
+                    Text("Soniox Real-Time v6").tag("stt-rt-v6")
                     Text("Soniox Real-Time v5").tag("stt-rt-v5")
-                    Text("Soniox Real-Time v4").tag("stt-rt-v4")
-                    if !["stt-rt-v5", "stt-rt-v4"].contains(state.config.model) {
+                    if !["stt-rt-v6", "stt-rt-v5"].contains(state.config.model) {
                         Text(state.config.model).tag(state.config.model)
                     }
                 }
@@ -92,8 +92,9 @@ struct SettingsView: View {
                 TextField("Context", text: binding(state, \.context),
                           prompt: Text("Names, products, jargon"), axis: .vertical)
                     .lineLimit(2...5)
+                Toggle("Use Text Before Cursor", isOn: binding(state, \.cursorContext))
             } footer: {
-                Text("Comma-separated terms Soniox should recognize.")
+                Text("Comma-separated terms Soniox should recognize. The text before the cursor goes along too, so dictation continues it; password fields are never read.")
             }
             Section {
                 LabeledContent("Stop After Silence") {

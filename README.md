@@ -87,11 +87,13 @@ The menu bar icon animates while recording; its menu holds
 **All Transcriptions** and **Settings**.
 
 - **Transcribe File** — drop or choose any audio or video file; Soniox's async
-  API returns the raw transcript, ready to copy. Video is reduced to its audio
+  API returns the transcript, ready to copy, with "Speaker N:" labels once a
+  second voice is heard. Your context terms go along. Video is reduced to its audio
   track before upload, and the file is deleted from Soniox afterwards.
 - **Meeting** — records your microphone plus everything the Mac plays (the other
-  side of a Meet or Zoom call), with or without headphones. Pause, continue, end;
-  the full transcript is ready to copy. The first meeting asks for the
+  side of a Meet or Zoom call), with or without headphones. Each change of voice
+  starts a "Speaker N:" paragraph. Pause, continue, end; the full transcript is
+  ready to copy. The first meeting asks for the
   **System Audio Recording** permission; without it the meeting uses the microphone only.
 
 Both save their transcripts to **All Transcriptions**.
@@ -99,7 +101,8 @@ Both save their transcripts to **All Transcriptions**.
 ## Settings
 
 - **General** — hotkey (recorded live, or a modifier double-tap), launch at login, Soniox key.
-- **Dictation** — model (`stt-rt-v5`), language hints, translate-to, context terms,
+- **Dictation** — model (`stt-rt-v6`), language hints, translate-to, context terms,
+  text before the cursor as context (up to 2,000 characters, never from password fields),
   stop after silence, paste at cursor, restore clipboard, save transcriptions.
 
 ## How it works

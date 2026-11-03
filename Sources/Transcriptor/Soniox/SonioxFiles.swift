@@ -12,12 +12,12 @@ enum SonioxFiles {
         init(_ message: String) { errorDescription = message }
     }
 
-    static let model = "stt-async-v5"
+    static let model = "stt-async-v6"
     private static let base = URL(string: "https://api.soniox.com/v1/")!
     private static let uploadable: Set<String> = ["mp3", "wav", "m4a", "flac", "ogg", "aac", "aiff", "aif", "amr"]
 
     @concurrent
-    static func transcribe(_ url: URL, apiKey: String, languageHints: [String],
+    static func transcribe(_ url: URL, apiKey: String, config: Config,
                            stage: @MainActor (Stage) -> Void) async throws -> (text: String, durationMs: Double?) {
         let asset = AVURLAsset(url: url)
         let seconds = try? await asset.load(.duration).seconds
@@ -33,7 +33,9 @@ enum SonioxFiles {
         await stage(.uploading)
         fileID = try await uploadFile(upload, apiKey: apiKey)
         await stage(.transcribing)
-        let job = NewJob(model: model, file_id: fileID!, language_hints: languageHints.isEmpty ? nil : languageHints)
+        let job = NewJob(model: model, file_id: fileID!,
+                         language_hints: config.languageHints.isEmpty ? nil : config.languageHints,
+                         context: .init(terms: config.terms))
         jobID = try await send(Job.self, "transcriptions", apiKey: apiKey, method: "POST",
                                json: try JSONEncoder().encode(job)).id
         while true {
@@ -42,8 +44,8 @@ enum SonioxFiles {
             if job.status == "completed" { break }
             if job.status == "error" { throw Failure(job.error_message ?? "Soniox could not transcribe this file") }
         }
-        let text = try await send(Transcript.self, "transcriptions/\(jobID!)/transcript", apiKey: apiKey).text
-        return (text.trimmingCharacters(in: .whitespacesAndNewlines), seconds.map { ($0 * 1000).rounded() })
+        let text = try await send(Transcript.self, "transcriptions/\(jobID!)/transcript", apiKey: apiKey).labeled
+        return (text, seconds.map { ($0 * 1000).rounded() })
     }
 
     private static func extractAudio(_ asset: AVURLAsset) async throws -> URL {
@@ -125,9 +127,25 @@ enum SonioxFiles {
         let model: String
         let file_id: String
         let language_hints: [String]?
+        let context: SonioxClient.ConfigMessage.Context?
+        var enable_speaker_diarization = true
     }
 
-    private struct Transcript: Decodable { let text: String }
+    private struct Transcript: Decodable {
+        struct Token: Decodable { let text: String; let speaker: String? }
+        let text: String
+        let tokens: [Token]
+
+        /// Speaker labels only once a second voice is heard.
+        var labeled: String {
+            guard Set(tokens.compactMap(\.speaker)).count > 1 else {
+                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            var out = "", last: String?
+            for token in tokens { out += SonioxClient.speakerMark(token.speaker, after: &last) + token.text }
+            return Session.collapse(out)
+        }
+    }
 }
 
 /// One file at a time, from drop to transcript; the result also lands in history.
@@ -154,10 +172,10 @@ final class FileTranscription {
         }
         fileName = url.lastPathComponent
         status = .working(.uploading)
-        let hints = store.config.languageHints
+        let config = store.config
         task = Task {
             do {
-                let result = try await SonioxFiles.transcribe(url, apiKey: apiKey, languageHints: hints) { [weak self] in
+                let result = try await SonioxFiles.transcribe(url, apiKey: apiKey, config: config) { [weak self] in
                     self?.status = .working($0)
                 }
                 guard !Task.isCancelled else { return }

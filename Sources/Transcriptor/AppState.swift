@@ -122,6 +122,8 @@ final class AppState {
                     return
                 }
             }
+            var config = self.config
+            if config.cursorContext { config.precedingText = await Cursor.precedingText() }
             guard state == .recording else { return } // cancelled while asking
             let session = Session(mic: mic)
             session.onTranscript = { [weak self] final, partial in

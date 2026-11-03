@@ -116,9 +116,11 @@ final class Session {
         Self.collapse(finalText + partialText)
     }
 
-    /// (finalText + partialText).replace(/\s+/g, " ").trim()
+    /// Whitespace runs become one space; a run with a line break stays one blank
+    /// line, which is how speaker turns are kept apart.
     nonisolated static func collapse(_ text: String) -> String {
-        text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        text.replacingOccurrences(of: #"\s*\n\s*"#, with: "\n\n", options: .regularExpression)
+            .replacingOccurrences(of: #"[^\S\n]+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

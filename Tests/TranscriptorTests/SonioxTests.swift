@@ -57,7 +57,7 @@ struct SonioxTests {
         let data = try JSONEncoder().encode(SonioxClient.configMessage(apiKey: "k", config: config))
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["api_key"] as? String == "k")
-        #expect(object["model"] as? String == "stt-rt-v5")
+        #expect(object["model"] as? String == "stt-rt-v6")
         #expect(object["audio_format"] as? String == "s16le")
         #expect(object["sample_rate"] as? Int == 16000)
         #expect(object["num_channels"] as? Int == 1)
@@ -84,5 +84,31 @@ struct SonioxTests {
         #expect(Session.collapse("  hello   world \n ") == "hello world")
         #expect(Session.collapse("a\t\tb") == "a b")
         #expect(Session.collapse("") == "")
+        #expect(Session.collapse("one. \n\nSpeaker 2:  two \n three") == "one.\n\nSpeaker 2: two\n\nthree")
+    }
+
+    @Test func configMessageSendsCursorTextAndSpeakers() throws {
+        var config = Config.defaults
+        config.precedingText = "  Dear Filip,\n "
+        config.labelSpeakers = true
+        let data = try JSONEncoder().encode(SonioxClient.configMessage(apiKey: "k", config: config))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let context = try #require(object["context"] as? [String: Any])
+        #expect(context["text"] as? String == "Dear Filip,")
+        #expect(context["terms"] == nil)
+        #expect(object["enable_speaker_diarization"] as? Bool == true)
+        #expect(try decode(#"{"tokens":[{"text":"hi","is_final":true,"speaker":"2"}]}"#).tokens?[0].speaker == "2")
+    }
+
+    @Test func dictationSendsNoSpeakerFlag() throws {
+        let data = try JSONEncoder().encode(SonioxClient.configMessage(apiKey: "k", config: .defaults))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["enable_speaker_diarization"] == nil)
+    }
+
+    @Test func speakerMarkOnlyOnChange() {
+        var last: String?
+        let marks = ["1", "1", nil, "2", "2", "1"].map { SonioxClient.speakerMark($0, after: &last) }
+        #expect(marks == ["\n\nSpeaker 1: ", "", "", "\n\nSpeaker 2: ", "", "\n\nSpeaker 1: "])
     }
 }
