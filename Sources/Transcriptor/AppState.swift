@@ -20,6 +20,7 @@ final class AppState {
     let meeting: Meeting
     private let mic = MicCapture()
     private var session: Session?
+    private var target: String?         // the app being dictated into, kept with the entry
     private var starting = false
     private var apiKey: String? // lazily read from Keychain on first dictation
 
@@ -111,6 +112,7 @@ final class AppState {
         // The island opens on this very frame; mic and socket catch up behind it.
         starting = true
         state = .recording
+        target = NSWorkspace.shared.frontmostApplication?.localizedName
         surface.show(minimized: config.notchMinimized)
         Task {
             defer { starting = false }
@@ -182,7 +184,7 @@ final class AppState {
     private func recordAndPaste(_ text: String, durationMs: Double) {
         Paste.pasteAtCursor(text, autoPaste: config.autoPaste, restoreClipboard: config.restoreClipboard)
         do {
-            try store.recordTranscript(text, durationMs: durationMs)
+            try store.recordTranscript(text, durationMs: durationMs, app: target)
         } catch {
             notify("History could not be saved", "Your transcription is still available on the clipboard.")
         }

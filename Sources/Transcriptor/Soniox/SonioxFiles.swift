@@ -181,7 +181,7 @@ final class FileTranscription {
                 guard !Task.isCancelled else { return }
                 guard !result.text.isEmpty else { return status = .failed("No speech found in this file.") }
                 status = .done(result.text)
-                try? store.recordTranscript(result.text, durationMs: result.durationMs)
+                try? store.recordTranscript(result.text, durationMs: result.durationMs, title: fileName, kind: .file)
             } catch {
                 guard !Task.isCancelled else { return }
                 status = .failed(error.localizedDescription)

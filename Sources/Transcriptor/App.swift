@@ -1,7 +1,14 @@
 import AppKit
 import SwiftUI
 
-@main
+@main @MainActor
+enum Entry {
+    static func main() {
+        if CommandLine.arguments.dropFirst().first == "mcp" { return MCP.serve() }
+        TranscriptorApp.main()
+    }
+}
+
 struct TranscriptorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 

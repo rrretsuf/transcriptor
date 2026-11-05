@@ -63,7 +63,8 @@ git clone https://github.com/rrretsuf/transcriptor.git ~/transcriptor && cd ~/tr
 
 Then tell the user to add their Soniox key in Settings and grant Microphone and
 Accessibility. Nothing else is required; there is no package manager, no
-dependencies, no configuration file to write.
+dependencies, no configuration file to write. To let agents read the
+transcriptions, run the commands in [Agents (MCP)](#agents-mcp).
 
 ### Stable code signing (optional)
 
@@ -96,7 +97,43 @@ The menu bar icon animates while recording; its menu holds
   ready to copy. The first meeting asks for the
   **System Audio Recording** permission; without it the meeting uses the microphone only.
 
-Both save their transcripts to **All Transcriptions**.
+Both save their transcripts to **All Transcriptions**. Meetings and files are kept
+for good; the oldest dictations fall off after 5,000.
+
+## Agents (MCP)
+
+`Transcriptor mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server in the same binary, so Claude, Codex and any MCP client can search and read
+your transcriptions. Local and read-only: it reads `history.json`, nothing leaves
+the Mac unless your agent sends it.
+
+| Tool | |
+| --- | --- |
+| `list_transcripts` | Search by words (case and accents ignored), kind (meeting, dictation, file) and date. Each result: title, local date and time, duration, words, speakers, the app a dictation went into, an excerpt. |
+| `read_transcript` | One transcription in full with those details; long meetings in parts. |
+
+Connect it once, for every folder:
+
+```bash
+claude mcp add -s user transcriptor -- /Applications/Transcriptor.app/Contents/MacOS/Transcriptor mcp
+codex mcp add transcriptor -- /Applications/Transcriptor.app/Contents/MacOS/Transcriptor mcp
+```
+
+Claude Desktop: add it under `mcpServers` in
+`~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+"transcriptor": { "command": "/Applications/Transcriptor.app/Contents/MacOS/Transcriptor", "args": ["mcp"] }
+```
+
+[`skills/transcriptor`](skills/transcriptor/SKILL.md) teaches an agent when and how
+to use it (dates, Slovene word stems, speaker labels, long meetings). Link it into
+your skills folder:
+
+```bash
+ln -s "$PWD/skills/transcriptor" ~/.claude/skills/transcriptor
+ln -s "$PWD/skills/transcriptor" ~/.codex/skills/transcriptor
+```
 
 ## Settings
 
@@ -118,7 +155,9 @@ Audio is streamed as it is spoken, so most of the transcript is already final by
 the time you stop talking. Audio itself is never written to disk.
 
 Local state lives in `~/Library/Application Support/Transcriptor`:
-`config.json` and `history.json`.
+`config.json` and `history.json`. Each history entry has its `kind` (dictation,
+meeting, file), `title`, `startedAt` and `at` (end), `durationMs`, `words`, and for
+dictations the `app` it was dictated into.
 
 ## Develop
 
