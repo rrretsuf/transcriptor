@@ -45,15 +45,21 @@ struct StoreTests {
         #expect(store.config == Config.defaults)
     }
 
-    @Test func recordTranscriptCapsAt500() throws {
+    @Test func capDropsOnlyTheOldestDictationsNeverMeetingsOrFiles() throws {
         let (store, _) = try makeStore()
         _ = store.load()
-        let old = (0..<500).map { HistoryEntry(id: "\($0)", text: "entry \($0)", at: Double($0), durationMs: nil, words: 2) }
-        try store.saveHistory(old)
-        try store.recordTranscript("new", durationMs: 10)
-        #expect(store.history.count == 500)
+        let dictations = (0..<historyLimit).map {
+            HistoryEntry(id: "\($0)", text: "entry \($0)", at: Double($0), durationMs: nil, words: 2)
+        }
+        let meeting = HistoryEntry(id: "m", text: "old meeting", at: 0, durationMs: nil, words: 2, title: "Kickoff")
+        let file = HistoryEntry(id: "f", text: "old file", at: 0, durationMs: nil, words: 2, title: "call.m4a", kind: .file)
+        try store.saveHistory(dictations + [meeting, file])
+        try store.recordTranscript("new", durationMs: 10, app: "Slack")
+        #expect(store.history.filter { $0.kind == .dictation }.count == historyLimit)
         #expect(store.history.first?.text == "new")
-        #expect(store.history.last?.id == "498") // the oldest entry fell off
+        #expect(store.history.first?.app == "Slack")
+        #expect(!store.history.contains { $0.id == "\(historyLimit - 1)" }) // the oldest dictation fell off
+        #expect(store.history.suffix(2).map(\.id) == ["m", "f"])
     }
 
     @Test func lastTranscriptUpdatesWhenHistoryDisabled() throws {

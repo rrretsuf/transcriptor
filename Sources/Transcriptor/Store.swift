@@ -106,8 +106,8 @@ final class Store {
 
     /// Returns the new entry's id, or nil when history is off.
     @discardableResult
-    func recordTranscript(_ text: String, durationMs: Double?,
-                          title: String? = nil, startedAt: Date? = nil) throws -> String? {
+    func recordTranscript(_ text: String, durationMs: Double?, title: String? = nil, startedAt: Date? = nil,
+                          kind: HistoryEntry.Kind? = nil, app: String? = nil) throws -> String? {
         lastTranscript = text
         guard config.saveHistory else { return nil }
         let entry = HistoryEntry(
@@ -117,9 +117,16 @@ final class Store {
             durationMs: durationMs,
             words: text.split(whereSeparator: { $0.isWhitespace }).count,
             title: title,
-            startedAt: startedAt.map { $0.timeIntervalSince1970 * 1000 }
+            startedAt: startedAt.map { $0.timeIntervalSince1970 * 1000 },
+            kind: kind,
+            app: app
         )
-        try saveHistory(Array(([entry] + history).prefix(historyLimit)))
+        var dictations = 0
+        try saveHistory(([entry] + history).filter {
+            guard $0.kind == .dictation else { return true }
+            dictations += 1
+            return dictations <= historyLimit
+        })
         return entry.id
     }
 

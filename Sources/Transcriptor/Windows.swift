@@ -352,10 +352,12 @@ struct HistoryView: View {
     }
 }
 
-private struct MeetingLabel: LabelStyle {
+private struct TitleLabel: LabelStyle {
+    let tint: Color
+
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 6) {
-            configuration.icon.foregroundStyle(.red).font(.caption)
+            configuration.icon.foregroundStyle(tint).font(.caption)
             configuration.title.lineLimit(1)
         }
     }
@@ -373,13 +375,13 @@ private struct HistoryRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 if let title = entry.title {
-                    Label(title, systemImage: "record.circle")
+                    Label(title, systemImage: entry.isMeeting ? "record.circle" : "doc")
                         .font(.headline)
-                        .labelStyle(MeetingLabel())
+                        .labelStyle(TitleLabel(tint: entry.isMeeting ? .red : .secondary))
                 }
                 Text(entry.text)
-                    .lineLimit(entry.isMeeting ? 3 : 4)
-                    .foregroundStyle(entry.isMeeting ? .secondary : .primary)
+                    .lineLimit(entry.title != nil ? 3 : 4)
+                    .foregroundStyle(entry.title != nil ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
                     if let start = entry.startedAt {
@@ -387,6 +389,7 @@ private struct HistoryRow: View {
                     } else {
                         Text(Date(timeIntervalSince1970: entry.at / 1000), format: .dateTime.month().day().hour().minute())
                     }
+                    if let app = entry.app { Text("·"); Text(app) }
                     if let words = entry.words { Text("·"); Text("\(words) words") }
                     if let ms = entry.durationMs {
                         Text("·")
