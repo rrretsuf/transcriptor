@@ -247,6 +247,31 @@ fn system_device(_: &cpal::Host) -> Option<(cpal::Device, cpal::SupportedStreamC
     None
 }
 
+/// Listens to what the computer plays, without a microphone, and returns the
+/// loudest 40 ms it heard. For the self-test on machines that have no microphone.
+pub fn probe_system_audio(listen: Duration) -> Result<f32, String> {
+    let (chunks, mut heard) = unbounded_channel();
+    let shared = Arc::new(Mutex::new(Shared { chunker: Chunker::new(), chunks: Some(chunks), system: VecDeque::new() }));
+    let (commands, _inbox) = channel();
+    let stream = build(&cpal::default_host(), Source::System, &shared, &commands)?;
+    let mut loudest = 0.0_f32;
+    let until = std::time::Instant::now() + listen;
+    while std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+        // No microphone drains the mix here: move what arrived through the chunker to measure it.
+        let mut shared = shared.lock().unwrap();
+        let shared = &mut *shared;
+        let samples: Vec<f32> = shared.system.drain(..).collect();
+        let chunks = shared.chunks.as_ref().unwrap();
+        shared.chunker.feed(&samples, |chunk| drop(chunks.send(chunk)));
+        while let Ok(chunk) = heard.try_recv() {
+            loudest = loudest.max(chunk.rms);
+        }
+    }
+    drop(stream);
+    Ok(loudest)
+}
+
 /// Whether a meeting can record what the computer plays, for the UI to say so.
 pub fn system_audio_available() -> bool {
     system_device(&cpal::default_host()).is_some()

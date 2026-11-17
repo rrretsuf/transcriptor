@@ -121,7 +121,7 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         format!("host={} input={:?} output={:?} system_audio={}", devices.host, devices.input, devices.output, devices.system_audio),
     );
 
-    // "mic" or "system": the test bench is playing sound into that source and it must be heard.
+    // "mic", "system" or "loopback": the test bench is playing sound there and it must be heard.
     let expected = std::env::var("TRANSCRIPTOR_EXPECT_AUDIO").unwrap_or_default();
     for (name, system) in [("microphone capture", false), ("microphone + system audio capture", true)] {
         let Ok(Ok((capture, mut chunks))) = tauri::async_runtime::spawn_blocking(move || audio::start(system)).await else {
@@ -148,6 +148,12 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         let flowing = count > 40 && first < 600 && gap < 400;
         let detail = format!("{count} chunks in 2 s, first after {first} ms, longest gap {gap} ms, loudest rms {loudest:.3}");
         report.check(name, flowing && (!required || heard) && !(silent && heard), detail);
+    }
+
+    let probe = tauri::async_runtime::spawn_blocking(|| audio::probe_system_audio(Duration::from_secs(2))).await.unwrap();
+    match probe {
+        Ok(loudest) => report.check("system audio alone", expected != "loopback" || loudest > 0.01, format!("loudest rms {loudest:.3}")),
+        Err(problem) => report.check("system audio alone", expected != "loopback", problem),
     }
 
     let dir = app.dir.clone();

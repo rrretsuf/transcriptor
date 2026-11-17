@@ -22,6 +22,22 @@ $lines = Run-App "--selftest" $dir 120
 $lines[0..($lines.Count - 2)] | Write-Host
 if ($lines[-1] -ne 0) { throw "self-test failed" }
 
+if ($lines -match "output=None") {
+    Write-Host "== no sound card on this machine: the loopback is not tested"
+} else {
+    Write-Host "== self-test with a sound playing: the loopback of the default output must hear it"
+    $sound = Get-ChildItem "$env:WINDIR\Media\*.wav" | Sort-Object Length -Descending | Select-Object -First 1
+    $player = New-Object System.Media.SoundPlayer $sound.FullName
+    $player.PlayLooping()
+    $env:TRANSCRIPTOR_EXPECT_AUDIO = "loopback"
+    $dir = New-Item -ItemType Directory (Join-Path $env:TEMP "transcriptor-loopback-$PID")
+    $lines = Run-App "--selftest" $dir 120
+    $lines | Where-Object { $_ -match "audio" } | Write-Host
+    $player.Stop()
+    Remove-Item Env:TRANSCRIPTOR_EXPECT_AUDIO
+    if ($lines[-1] -ne 0) { throw "the loopback did not hear the sound" }
+}
+
 Write-Host "== hotkey and paste into another app"
 $dir = New-Item -ItemType Directory (Join-Path $env:TEMP "transcriptor-e2e-$PID")
 $typed = Join-Path $dir "typed.txt"
