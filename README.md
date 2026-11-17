@@ -18,6 +18,8 @@ For macOS, Windows and Linux. Native Swift on the Mac, Rust elsewhere; no Electr
 
 ## Install
 
+**[rrretsuf.github.io/transcriptor](https://rrretsuf.github.io/transcriptor/)** picks the right download for your computer.
+
 | System | Download | Needs |
 | --- | --- | --- |
 | macOS | [Transcriptor.dmg](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg) | macOS 15 or later, Apple Silicon or Intel |
