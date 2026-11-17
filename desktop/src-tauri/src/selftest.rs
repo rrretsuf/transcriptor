@@ -108,11 +108,12 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         report.check("hotkey registered", problem.is_none(), problem.unwrap_or(app.hotkey_label()));
     }
 
-    let changed = Config { hotkey: "Control+Alt+K".into(), context: "ENKI".into(), ..Config::default() };
-    let saved = app.store.lock().unwrap().save_config(changed.clone());
+    // Written back as it is: a self-test on a real installation changes no setting.
+    let current = app.config();
+    let saved = app.store.lock().unwrap().save_config(current.clone());
     let mut reloaded = crate::store::Store::new(app.dir.clone());
     reloaded.load();
-    report.check("config round trip", saved.is_ok() && reloaded.config == changed, app.dir.display());
+    report.check("config round trip", saved.is_ok() && reloaded.config == current, app.dir.display());
 
     let devices = tauri::async_runtime::spawn_blocking(audio::devices).await.unwrap();
     report.note(

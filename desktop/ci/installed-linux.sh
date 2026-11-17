@@ -6,7 +6,7 @@ set -euo pipefail
 DATA=${XDG_DATA_HOME:-$HOME/.local/share}/Transcriptor
 
 echo "== .deb"
-sudo apt-get install -y "$1"/*.deb >/dev/null
+sudo apt-get install -y "$(realpath "$1"/*.deb)" >/dev/null
 transcriptor --selftest
 test -f "$DATA/config.json"
 sudo apt-get remove -y transcriptor >/dev/null

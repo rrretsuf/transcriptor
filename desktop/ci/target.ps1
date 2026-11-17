@@ -17,10 +17,14 @@ $box.Add_TextChanged({ Set-Content -Path $Out -Value $box.Text -NoNewline })
 $box.Add_KeyDown({ Add-Content -Path "$Out.keys" -Value "$($_.KeyData)" })
 $form.Add_Shown({
     # Windows only lets a process take the foreground right after input; a tap on Alt counts.
+    # A lone Alt also opens the window menu, which would swallow the keys that follow: Escape closes it.
     [Native.Window]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
     [Native.Window]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
     [Native.Window]::SetForegroundWindow($form.Handle) | Out-Null
     $form.Activate()
+    [Native.Window]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
+    [Native.Window]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+    [Windows.Forms.Application]::DoEvents()
     $box.Focus()
     Set-Content -Path "$Out.ready" -Value "ready"
 })

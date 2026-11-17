@@ -78,18 +78,31 @@ pub fn start(system_audio: bool) -> Result<(Capture, UnboundedReceiver<Chunk>), 
 
         // Headphones in or out mid-recording invalidate the stream. Rebuild it on
         // the new default device once the route settles and keep the same session.
-        while let Ok(Command::Rebuild(source)) = inbox.recv() {
-            match source {
-                Source::Microphone => microphone = None,
-                Source::System => system = None,
-            }
+        while let Ok(Command::Rebuild(first)) = inbox.recv() {
             std::thread::sleep(Duration::from_millis(300));
+            // Every error about the stream that is gone has queued up by now.
+            let mut lost = vec![first];
+            let mut stopped = false;
+            for command in inbox.try_iter() {
+                match command {
+                    Command::Stop => stopped = true,
+                    Command::Rebuild(source) => lost.push(source),
+                }
+            }
+            if stopped {
+                break;
+            }
             let host = cpal::default_host();
-            let rebuilt = build(&host, source, &shared, &worker_commands).ok();
-            match source {
-                Source::Microphone if rebuilt.is_none() => break,
-                Source::Microphone => microphone = rebuilt,
-                Source::System => system = rebuilt,
+            if lost.contains(&Source::Microphone) {
+                drop(microphone.take()); // the old stream lets go of the device first
+                microphone = build(&host, Source::Microphone, &shared, &worker_commands).ok();
+                if microphone.is_none() {
+                    break;
+                }
+            }
+            if lost.contains(&Source::System) {
+                drop(system.take());
+                system = build(&host, Source::System, &shared, &worker_commands).ok();
             }
         }
         drop(microphone);
