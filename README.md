@@ -227,6 +227,16 @@ swift test      # unit tests
 ./build.sh      # rebuild, reinstall, relaunch
 ```
 
+### Release
+
+1. Set the new version in `Resources/Info.plist`, `desktop/src-tauri/tauri.conf.json`,
+   `desktop/src-tauri/Cargo.toml` and the `transcriptor` entry of `Cargo.lock`.
+2. `./build.sh dmg`, on the Mac that holds the signing identity, so the
+   Accessibility grant survives the update.
+3. Push `main`, then `gh release create v<version> .build/Transcriptor.dmg --target main`.
+   The tag starts the Desktop workflow, which adds the Windows and Linux installers
+   to the same release. The download page reads the latest release on its own.
+
 ## License
 
 [PolyForm Shield 1.0.0](LICENSE). Use it anywhere — at home, at work, in your
