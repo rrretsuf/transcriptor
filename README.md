@@ -23,8 +23,8 @@ For macOS, Windows and Linux. Native Swift on the Mac, Rust elsewhere; no Electr
 | System | Download | Needs |
 | --- | --- | --- |
 | macOS | [Transcriptor.dmg](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg) | macOS 15 or later, Apple Silicon or Intel |
-| Windows | coming with the next release | Windows 10 or 11, 64-bit |
-| Linux | coming with the next release | 64-bit, X11 or Wayland |
+| Windows | [Transcriptor-windows-x64-setup.exe](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-windows-x64-setup.exe) | Windows 10 or 11, 64-bit |
+| Linux | [AppImage](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-x86_64.AppImage) · [.deb](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-amd64.deb) (arm64: [AppImage](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-aarch64.AppImage) · [.deb](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-arm64.deb)) | 64-bit, X11 or Wayland |
 
 You also need a Soniox API key from [console.soniox.com](https://console.soniox.com).
 The welcome window asks for it, lets you choose the hotkey, asks for the permissions
@@ -32,15 +32,36 @@ one by one and ends with a test dictation.
 
 <img src="assets/welcome.jpg" width="340" alt="The welcome window: choose your hotkey">
 
-Transcriptor is not signed with a paid Apple certificate, so macOS warns once on
-the first start. Open the disk image and drag Transcriptor to Applications. Open
-it; macOS says it could not verify the app. Click **Done**, then go to
+Transcriptor is not signed with a paid Apple or Microsoft certificate, so macOS
+and Windows warn once on the first start.
+
+**macOS** — open the disk image and drag Transcriptor to Applications. Open it;
+macOS says it could not verify the app. Click **Done**, then go to
 System Settings › Privacy & Security, scroll down and click **Open Anyway**.
 To skip the warning, install from Terminal instead:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rrretsuf/transcriptor/main/install.sh | bash
 ```
+
+**Windows** — run the installer; it needs no administrator rights. If SmartScreen
+says "Windows protected your PC", click **More info**, then **Run anyway**. If the
+pill says "Microphone unavailable", turn on Settings › Privacy & security ›
+Microphone › "Let desktop apps access your microphone".
+
+**Linux** — install the .deb, or make the AppImage executable and run it:
+
+```bash
+sudo apt install ./Transcriptor-linux-amd64.deb
+```
+
+```bash
+chmod +x Transcriptor-linux-x86_64.AppImage && ./Transcriptor-linux-x86_64.AppImage
+```
+
+On Wayland the desktop decides what an app may do. If it offers no shortcut
+portal, bind a key in your system settings to `transcriptor --toggle`. If it
+refuses a synthetic paste, the text stays on the clipboard and the pill says so.
 
 Updating is the same: download and install the new version over the old one.
 Your transcriptions and settings live outside the app and stay where they are; a
@@ -69,6 +90,8 @@ Accessibility grant after every rebuild. To keep it, create a self-signed
 code-signing certificate named **Transcriptor Local Signing** in Keychain Access
 (Certificate Assistant › Create a Certificate › Code Signing). `build.sh` picks it up
 automatically; `SIGN_IDENTITY="…" ./build.sh` uses a different name.
+
+The Windows and Linux app lives in [`desktop/`](desktop) with its own build notes.
 
 ### For AI agents
 
@@ -100,7 +123,7 @@ At this pace a full month is ~13 hours of speech for about $1.60.
 
 | Action | Key |
 | --- | --- |
-| Start / stop dictation | `⌥ Space` (change it in Settings — click, press keys) |
+| Start / stop dictation | `⌥ Space` on macOS, `Ctrl Shift Space` on Windows and Linux (change it in Settings — click, press keys) |
 | Cancel without pasting | `Esc` |
 | Fold the island to a dot beside the notch | Click **−** on the island, **+** to unfold (remembered) |
 | Copy a past transcription | Click it in **All Transcriptions** |
@@ -121,6 +144,20 @@ The menu bar icon animates while recording; its menu holds
 
 Both save their transcripts to **All Transcriptions**. Meetings and files are kept
 for good; the oldest dictations fall off after 5,000.
+
+### Differences on Windows and Linux
+
+- One window with a sidebar holds Transcriptions, Meeting, Transcribe File and Settings.
+- A video file is uploaded as it is; the Mac app reduces it to its audio track first.
+- Text before the cursor is not sent as context, and double-tap hotkeys are not available.
+- Clipboard restore handles text only.
+- Paste does not reach apps that run as administrator on Windows, and `Ctrl V` does
+  not paste in Linux terminals.
+- GNOME shows the tray icon only with the AppIndicator extension; starting the app
+  again opens the window.
+- A Bluetooth headset drops to call quality while its microphone is open. That is
+  the headset's rule, on every system.
+- The MCP server below is in the Mac app only.
 
 ## Agents (MCP)
 

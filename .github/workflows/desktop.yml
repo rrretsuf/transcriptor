@@ -68,7 +68,7 @@ jobs:
       - name: Virtual sound card (Windows)
         if: runner.os == 'Windows'
         continue-on-error: true
-        uses: LABSN/sound-ci-helpers@v1
+        uses: LABSN/sound-ci-helpers@d08c889a7bba7d9b1b059f8f76dac4672ea3a9cf # v1
 
       - name: Sound service and test tools (Windows)
         if: runner.os == 'Windows'
