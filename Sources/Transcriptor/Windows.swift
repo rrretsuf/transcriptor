@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 import SwiftUI
 
 // MARK: - Config bindings
@@ -17,6 +16,20 @@ private func binding<V>(_ state: AppState, _ keyPath: WritableKeyPath<Config, V>
             then()
         }
     )
+}
+
+extension View {
+    /// Liquid Glass on macOS 26, the bordered styles before it.
+    @ViewBuilder
+    func glassButton(prominent: Bool = false) -> some View {
+        if #available(macOS 26, *) {
+            if prominent { buttonStyle(.glassProminent) } else { buttonStyle(.glass) }
+        } else if prominent {
+            buttonStyle(.borderedProminent)
+        } else {
+            buttonStyle(.bordered)
+        }
+    }
 }
 
 /// Languages Soniox recognizes, shown with the system's localized names.
@@ -48,12 +61,9 @@ struct SettingsView: View {
     private var general: some View {
         Form {
             Section {
-                HotkeyRecorder(hotkey: binding(state, \.hotkey) { state.registerHotkey() })
+                HotkeyRecorder(hotkey: binding(state, \.hotkey) { state.registerHotkeyOrNotify() })
                 LabeledContent("Cancel Recording", value: Hotkeys.display(AppState.cancelHotkey))
-                Toggle("Launch at Login", isOn: binding(state, \.launchAtLogin) {
-                    if state.config.launchAtLogin { try? SMAppService.mainApp.register() }
-                    else { try? SMAppService.mainApp.unregister() }
-                })
+                Toggle("Launch at Login", isOn: binding(state, \.launchAtLogin) { state.applyLaunchAtLogin() })
             }
             Section {
                 KeyField(label: "Soniox", account: Keychain.Account.soniox) { state.forgetKey() }
@@ -119,17 +129,16 @@ struct SettingsView: View {
 /// Click, press the combination, done. Escape cancels; modifier double-taps live in the menu.
 private struct HotkeyRecorder: View {
     @Binding var hotkey: String
-    @State private var recording = false
-    @State private var monitor: Any?
+    @State private var capture = KeyCapture()
 
     var body: some View {
         LabeledContent("Dictation Hotkey") {
             HStack(spacing: 6) {
-                Button(recording ? "Press keys…" : Hotkeys.display(hotkey)) {
-                    recording ? stop() : start()
+                Button(capture.recording ? "Press keys…" : Hotkeys.display(hotkey)) {
+                    capture.recording ? capture.stop() : capture.start { hotkey = $0 }
                 }
                 .buttonStyle(.bordered)
-                .foregroundStyle(recording ? .secondary : .primary)
+                .foregroundStyle(capture.recording ? .secondary : .primary)
                 Menu {
                     Button("Double-tap ⌘") { set("tap:Command:2") }
                     Button("Double-tap ⌥") { set("tap:Option:2") }
@@ -143,32 +152,12 @@ private struct HotkeyRecorder: View {
                 .fixedSize()
             }
         }
-        .onDisappear(perform: stop)
-    }
-
-    private func start() {
-        recording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainActor.assumeIsolated {
-                if event.keyCode != 53, // escape cancels
-                   let accelerator = Hotkeys.accelerator(keyCode: event.keyCode, flags: event.modifierFlags) {
-                    set(accelerator)
-                }
-                stop()
-            }
-            return nil
-        }
-    }
-
-    private func stop() {
-        recording = false
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        .onDisappear(perform: capture.stop)
     }
 
     private func set(_ value: String) {
+        capture.stop()
         hotkey = value
-        stop()
     }
 }
 

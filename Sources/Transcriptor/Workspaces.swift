@@ -29,7 +29,7 @@ struct FileView: View {
                 } description: {
                     Text(message)
                 } actions: {
-                    Button("Try Another File", action: files.reset).buttonStyle(.glass)
+                    Button("Try Another File", action: files.reset).glassButton()
                 }
                 .transition(.blurReplace)
             }
@@ -98,7 +98,7 @@ private struct Working: View {
                     .contentTransition(.opacity)
                     .animation(.easeOut(duration: 0.2), value: detail)
             }
-            Button("Cancel", action: cancel).buttonStyle(.glass)
+            Button("Cancel", action: cancel).glassButton()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -149,7 +149,7 @@ struct MeetingView: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Button("Start Recording", systemImage: "record.circle", action: meeting.start)
-                    .buttonStyle(.glassProminent)
+                    .glassButton(prominent: true)
                     .tint(.red)
                     .controlSize(.large)
             }
@@ -209,11 +209,11 @@ struct MeetingView: View {
                         .contentTransition(.symbolEffect(.replace))
                         .frame(minWidth: 96)
                 }
-                .buttonStyle(.glass)
+                .glassButton()
                 Button(action: meeting.end) {
                     Label("End", systemImage: "stop.fill").frame(minWidth: 72)
                 }
-                .buttonStyle(.glassProminent)
+                .glassButton(prominent: true)
                 .tint(.red)
             }
             .controlSize(.large)
@@ -315,7 +315,7 @@ private struct TranscriptPanel: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button(again.title, action: again.action).buttonStyle(.glass)
+                Button(again.title, action: again.action).glassButton()
                 CopyButton(text: text).disabled(text.isEmpty)
             }
             .controlSize(.large)
@@ -343,7 +343,7 @@ private struct CopyButton: View {
                 .contentTransition(.symbolEffect(.replace))
                 .frame(minWidth: 72)
         }
-        .buttonStyle(.glassProminent)
+        .glassButton(prominent: true)
         .animation(.snappy, value: copied)
     }
 }

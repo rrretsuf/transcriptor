@@ -10,8 +10,10 @@ final class Store {
     var lastTranscript = ""
     private var persistTask: Task<Void, Never>?
 
+    /// TRANSCRIPTOR_DATA_DIR points a test run away from the real transcriptions.
     init(directory: URL? = nil) {
-        self.directory = directory ?? FileManager.default
+        let override = ProcessInfo.processInfo.environment["TRANSCRIPTOR_DATA_DIR"].map { URL(filePath: $0) }
+        self.directory = directory ?? override ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(component: "Transcriptor")
     }

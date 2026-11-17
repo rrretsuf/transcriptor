@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
+import ServiceManagement
 
 // Global so other types (NotchSurface, tests) can use them without inheriting
 // the AppState actor isolation.
@@ -35,10 +36,23 @@ final class AppState {
 
     /// Lent by the tray label view; agent apps must activate before a window can come forward.
     var openSettings: (() -> Void)?
+    var openWindow: ((String) -> Void)?
 
     func showSettings() {
         NSApp.activate(ignoringOtherApps: true)
         openSettings?()
+    }
+
+    func showOnboarding() {
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow?("onboarding")
+    }
+
+    func finishOnboarding() {
+        var next = config
+        next.onboarded = true
+        store.stage(next)
+        store.flushConfig()
     }
 
     /// Island minus / plus: fold the island down to the notch's height, remembered.
@@ -49,16 +63,36 @@ final class AppState {
         surface.setMinimized(minimized)
     }
 
+    // Reapplied on every launch: a reinstall by build.sh can drop the login item.
+    func applyLaunchAtLogin() {
+        let app = SMAppService.mainApp
+        if config.launchAtLogin, app.status != .enabled { try? app.register() }
+        if !config.launchAtLogin, app.status == .enabled { try? app.unregister() }
+    }
+
     /* ---------------------------------- hotkeys --------------------------------- */
 
-    func registerHotkey() {
+    /// False when another app already owns the combination.
+    @discardableResult
+    func registerHotkey() -> Bool {
         hotkeys.unregisterAll()
         if state != .idle { registerCancelKeys() }
         applyTapWatcher()
-        if Hotkeys.parseTap(config.hotkey) != nil { return }
-        if !hotkeys.register(config.hotkey, handler: { [weak self] in self?.toggle() }) {
+        if Hotkeys.parseTap(config.hotkey) != nil { return true }
+        return hotkeys.register(config.hotkey) { [weak self] in self?.toggle() }
+    }
+
+    /// Launch and Settings have no place to show a taken hotkey; the welcome window does.
+    func registerHotkeyOrNotify() {
+        if !registerHotkey() {
             notify("Hotkey unavailable", "\(config.hotkey) is already taken by another app.")
         }
+    }
+
+    /// While a new hotkey is being recorded; registerHotkey() resumes.
+    func suspendHotkey() {
+        hotkeys.unregisterAll()
+        tapWatcher.stop()
     }
 
     // tap:<modifier>:<count> needs a CGEvent watcher; Carbon cannot express it.
@@ -105,8 +139,12 @@ final class AppState {
     private func beginSession() {
         if apiKey?.isEmpty ?? true { apiKey = Keychain.get(Keychain.Account.soniox) }
         guard let apiKey, !apiKey.isEmpty else {
-            notify("Transcriptor", "Add your Soniox API key in Settings first.")
-            showSettings()
+            if config.onboarded {
+                notify("Transcriptor", "Add your Soniox API key in Settings first.")
+                showSettings()
+            } else {
+                showOnboarding()
+            }
             return
         }
         // The island opens on this very frame; mic and socket catch up behind it.

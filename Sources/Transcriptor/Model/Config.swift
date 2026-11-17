@@ -11,9 +11,10 @@ struct Config: Codable, Equatable {
     var autoPaste = true
     var restoreClipboard = false
     var silenceStopMs = 0.0
-    var launchAtLogin = false
+    var launchAtLogin = true
     var saveHistory = true
     var notchMinimized = false
+    var onboarded = false
 
     // Per session, never saved.
     var precedingText = ""
@@ -31,7 +32,7 @@ struct Config: Codable, Equatable {
     // apiKey lives in the Keychain, never in config.json.
     enum CodingKeys: String, CodingKey {
         case model, languageHints, context, cursorContext, translateTo
-        case hotkey, autoPaste, restoreClipboard, silenceStopMs, launchAtLogin, saveHistory, notchMinimized
+        case hotkey, autoPaste, restoreClipboard, silenceStopMs, launchAtLogin, saveHistory, notchMinimized, onboarded
     }
 
     init() {}
@@ -51,5 +52,6 @@ struct Config: Codable, Equatable {
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
         saveHistory = try c.decodeIfPresent(Bool.self, forKey: .saveHistory) ?? d.saveHistory
         notchMinimized = try c.decodeIfPresent(Bool.self, forKey: .notchMinimized) ?? d.notchMinimized
+        onboarded = try c.decodeIfPresent(Bool.self, forKey: .onboarded) ?? d.onboarded
     }
 }

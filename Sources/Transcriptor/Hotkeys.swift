@@ -146,3 +146,32 @@ final class Hotkeys {
         }, 1, &spec, nil, nil)
     }
 }
+
+/// Records one key press for a hotkey field: click, press the combination, done.
+/// Escape cancels; a bare key is ignored because it would swallow typing.
+@MainActor @Observable
+final class KeyCapture {
+    private(set) var recording = false
+    @ObservationIgnored private var monitor: Any?
+
+    func start(_ onKey: @escaping (String) -> Void) {
+        stop()
+        recording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            MainActor.assumeIsolated {
+                if event.keyCode != 53,
+                   let accelerator = Hotkeys.accelerator(keyCode: event.keyCode, flags: event.modifierFlags) {
+                    onKey(accelerator)
+                }
+                self?.stop()
+            }
+            return nil
+        }
+    }
+
+    func stop() {
+        recording = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}

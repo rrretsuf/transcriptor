@@ -40,6 +40,15 @@ struct TranscriptorApp: App {
         }
         .defaultSize(width: 520, height: 560)
         .restorationBehavior(.disabled)
+
+        Window("Welcome to Transcriptor", id: "onboarding") {
+            OnboardingView(state: delegate.appState)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
     }
 
 }
@@ -49,10 +58,14 @@ struct TranscriptorApp: App {
 private struct TrayLabel: View {
     let state: AppState
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image(nsImage: Self.trayImage(active: state.state != .idle || state.meeting.status == .recording))
-            .onAppear { state.openSettings = { openSettings() } }
+            .onAppear {
+                state.openSettings = { openSettings() }
+                state.openWindow = { openWindow(id: $0) }
+            }
     }
 
     // Drawn as a vector so it stays crisp at any scale: five rounded bars, nothing else.
@@ -143,14 +156,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // The hotkey is the product; register it before anything that can wait a frame.
-        appState.registerHotkey()
+        appState.registerHotkeyOrNotify()
+        appState.applyLaunchAtLogin()
         // Paint the island once (invisible, inside the notch) so the first session is instant.
         appState.surface.install()
         appState.surface.onMinimize = { [appState] in appState.setNotchMinimized($0) }
         // Warm mic, key and TLS shortly after launch so the first hotkey is as fast as the tenth.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [appState] in
             appState.prepare()
-            Paste.ensureAccessibility()
+            // A new user meets the permissions one by one in the welcome window,
+            // never as a system dialog over an empty desktop.
+            if appState.config.onboarded { Paste.ensureAccessibility() } else { appState.showOnboarding() }
         }
     }
 }

@@ -58,6 +58,16 @@ enum SonioxFiles {
         return out
     }
 
+    /// Whether Soniox accepts the key; nil when Soniox cannot be reached.
+    static func accepts(apiKey: String) async -> Bool? {
+        var request = request("models", apiKey: apiKey, method: "GET")
+        request.timeoutInterval = 10
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let code = (response as? HTTPURLResponse)?.statusCode else { return nil }
+        if (200..<300).contains(code) { return true }
+        return code == 401 || code == 403 ? false : nil
+    }
+
     private static func uploadFile(_ file: URL, apiKey: String) async throws -> String {
         let boundary = UUID().uuidString
         var body = Data(("--\(boundary)\r\n"

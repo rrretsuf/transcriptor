@@ -22,12 +22,10 @@ enum Paste {
     /// Asks once with the system dialog (which deep-links to the right pane).
     @discardableResult
     static func ensureAccessibility() -> Bool {
-        if AXIsProcessTrusted() { return true }
+        if Permission.accessibility.granted { return true }
         if !accessibilityPrompted {
             accessibilityPrompted = true
-            // The literal is the documented value of kAXTrustedCheckOptionPrompt,
-            // which Swift 6 refuses to read as a global var.
-            AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+            Task { await Permission.accessibility.request() }
         }
         return false
     }

@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Transcriptor",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(name: "Transcriptor", dependencies: ["ObjCTry"], path: "Sources/Transcriptor"),
         .target(name: "ObjCTry", path: "Sources/ObjCTry", cSettings: [.unsafeFlags(["-fobjc-arc"])]),
