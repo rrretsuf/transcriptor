@@ -81,15 +81,22 @@ impl App {
 
     /* ---------------------------------- key ---------------------------------- */
 
-    /// Read from the credential store once, then kept in memory.
-    pub async fn api_key(&self) -> Option<String> {
+    /// Read from the credential store once, then kept in memory. A locked
+    /// keyring asks the user for its password first, so this can take as long
+    /// as they do; the read finishes and is remembered even if the caller gave up waiting.
+    pub async fn api_key(self: &Arc<Self>) -> Option<String> {
         if let Some(key) = self.key.lock().unwrap().clone() {
             return Some(key);
         }
-        let dir = self.dir.clone();
-        let key = spawn_blocking(move || keystore::get(&dir, keystore::SONIOX)).await.ok().flatten()?;
-        *self.key.lock().unwrap() = Some(key.clone());
-        Some(key)
+        let app = self.clone();
+        let read = spawn_blocking(move || {
+            let key = keystore::get(&app.dir, keystore::SONIOX);
+            if key.is_some() {
+                app.key.lock().unwrap().clone_from(&key);
+            }
+            key
+        });
+        read.await.ok().flatten()
     }
 
     pub async fn set_api_key(&self, key: &str) -> Result<(), String> {

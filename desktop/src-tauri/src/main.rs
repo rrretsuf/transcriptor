@@ -31,8 +31,9 @@ type AppState<'a> = State<'a, Arc<App>>;
 
 #[tauri::command]
 async fn snapshot(app: AppState<'_>) -> Result<Value, String> {
-    let has_key = app.api_key().await.is_some();
     let app = app.inner().clone();
+    // The window must not stay blank behind a keyring's password dialog; it asks again when it gets focus.
+    let has_key = tokio::time::timeout(std::time::Duration::from_secs(2), app.api_key()).await.ok().flatten().is_some();
     // Asking the audio server what exists can take a moment; keep it off the UI thread.
     let system_audio = tauri::async_runtime::spawn_blocking(audio::system_audio_available).await.unwrap_or(false);
     Ok(json!({

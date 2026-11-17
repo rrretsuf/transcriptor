@@ -54,6 +54,9 @@ pub fn create_windows(handle: &AppHandle) -> tauri::Result<()> {
         .inner_size(900.0, 660.0)
         .min_inner_size(720.0, 540.0)
         .visible(false)
+        // Created in the background: a window that takes the keyboard while
+        // hidden would leave the user typing into nothing after login.
+        .focused(false)
         .center();
     #[cfg(target_os = "windows")]
     let main = if has_mica() {

@@ -159,19 +159,20 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
     }
 
     let dir = app.dir.clone();
-    let stored = tauri::async_runtime::spawn_blocking(move || {
+    let round_trip = tauri::async_runtime::spawn_blocking(move || {
         let written = keystore::set(&dir, "selftest", "secret-value");
         let read = keystore::get(&dir, "selftest");
         let _ = keystore::set(&dir, "selftest", "");
         (written, read, keystore::get(&dir, "selftest"))
-    })
-    .await
-    .unwrap();
-    report.check(
-        "key store round trip",
-        stored.0.is_ok() && stored.1.as_deref() == Some("secret-value") && stored.2.is_none(),
-        format!("{:?}", stored.0),
-    );
+    });
+    match tokio::time::timeout(Duration::from_secs(30), round_trip).await {
+        Ok(Ok(stored)) => report.check(
+            "key store round trip",
+            stored.0.is_ok() && stored.1.as_deref() == Some("secret-value") && stored.2.is_none(),
+            format!("{:?}", stored.0),
+        ),
+        _ => report.check("key store round trip", false, "no answer in 30 s: is the keyring waiting for a password?"),
+    }
 
     shell::show_pill(&app.handle);
     tokio::time::sleep(Duration::from_millis(600)).await;

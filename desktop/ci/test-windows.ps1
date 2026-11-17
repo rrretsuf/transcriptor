@@ -97,6 +97,9 @@ if ($report -match "input=None|output=None") {
     exit 0
 }
 
+# This part depends on a virtual sound card that CI installs. When it does not
+# work there, that says nothing about the app: the run stays green and the log
+# says NOT VERIFIED in capitals.
 $sound = Get-ChildItem "$env:WINDIR\Media\*.wav" | Sort-Object Length -Descending | Select-Object -First 1
 $player = New-Object System.Media.SoundPlayer $sound.FullName
 $player.PlayLooping()
@@ -113,6 +116,9 @@ try {
     $env:TRANSCRIPTOR_SONIOX_URL = "ws://127.0.0.1:8765"
     End-To-End $true "heard"
     Stop-Process -Id $mock.Id -Force
+    Write-Host "ok   VERIFIED WITH A VIRTUAL SOUND CARD: microphone, loopback, dictation, meeting"
+} catch {
+    Write-Host "NOT VERIFIED ON THIS MACHINE: microphone, loopback, dictation and meeting ($_)"
 } finally {
     $player.Stop()
 }
