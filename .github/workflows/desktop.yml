@@ -1,0 +1,93 @@
+name: Desktop
+
+# Builds, tests and packages the Windows and Linux app in desktop/.
+# A push runs the tests and keeps the installers as artifacts; a v* tag also
+# uploads them to that tag's GitHub release under version-less names, so
+# releases/latest/download/<name> always points at the newest build.
+
+on:
+  push:
+    branches: [desktop, main]
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows x64, os: windows-latest }
+          - { name: Linux x64, os: ubuntu-22.04 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build and test packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
+            xvfb openbox xdotool zenity dbus-x11 gnome-keyring pulseaudio pulseaudio-utils espeak-ng
+          pip install websockets
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Unit tests
+        working-directory: desktop/src-tauri
+        run: cargo test --release
+
+      - name: Build installers
+        working-directory: desktop
+        run: npx --yes @tauri-apps/cli@2.12.5 build
+
+      - name: Test the built app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- desktop/ci/test-linux.sh desktop/src-tauri/target/release/transcriptor
+
+      - name: Test the built app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: desktop/ci/test-windows.ps1 desktop/src-tauri/target/release/transcriptor.exe
+
+      - name: Collect installers
+        run: |
+          mkdir installers
+          bundle=desktop/src-tauri/target/release/bundle
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp $bundle/nsis/*-setup.exe installers/Transcriptor-windows-x64-setup.exe
+          else
+            cp $bundle/appimage/*.AppImage installers/Transcriptor-linux-x86_64.AppImage
+            cp $bundle/deb/*.deb installers/Transcriptor-linux-amd64.deb
+          fi
+          ls -l installers
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcriptor-${{ runner.os }}
+          path: installers/*
+          if-no-files-found: error
+
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Transcriptor ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" installers/* --clobber
