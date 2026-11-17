@@ -1,0 +1,143 @@
+name: Desktop
+
+# Builds, tests and packages the Windows and Linux app in desktop/.
+# A push runs the tests and keeps the installers as artifacts; a v* tag also
+# uploads them to that tag's GitHub release under version-less names, so
+# releases/latest/download/<name> always points at the newest build.
+
+on:
+  push:
+    branches: [desktop, main]
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows x64, id: windows-x64, os: windows-latest }
+          - { name: Linux x64, id: linux-x64, os: ubuntu-22.04 }
+          - { name: Linux arm64, id: linux-arm64, os: ubuntu-22.04-arm }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux build and test packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
+            xvfb openbox xdotool zenity dbus-x11 gnome-keyring pulseaudio pulseaudio-utils espeak-ng imagemagick
+          pip install websockets
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Unit tests
+        working-directory: desktop/src-tauri
+        run: cargo test --release
+
+      - name: Build installers
+        working-directory: desktop
+        run: npx --yes @tauri-apps/cli@2.12.5 build
+
+      - name: Test the built app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- desktop/ci/test-linux.sh desktop/src-tauri/target/release/transcriptor
+
+      # GitHub's Windows machines have no sound card. VB-CABLE is a virtual one
+      # whose microphone hears what its speaker plays, so the microphone, the
+      # loopback, a dictation and a meeting can be tested for real.
+      - name: Virtual sound card (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        uses: LABSN/sound-ci-helpers@v1
+
+      - name: Sound service and test tools (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Start-Service Audiosrv
+          # Windows Server ships with microphone access for desktop apps switched off.
+          foreach ($hive in "HKLM", "HKCU") {
+            reg add "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone" /v Value /t REG_SZ /d Allow /f
+          }
+          pip install websockets
+
+      - name: Test the built app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: desktop/ci/test-windows.ps1 desktop/src-tauri/target/release/transcriptor.exe
+
+      - name: Screenshots (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- desktop/ci/screens-linux.sh desktop/src-tauri/target/release/transcriptor screens
+
+      - name: Screenshots (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: desktop/ci/screens-windows.ps1 desktop/src-tauri/target/release/transcriptor.exe screens
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-${{ matrix.id }}
+          path: screens/*
+          if-no-files-found: warn
+
+      - name: Collect installers
+        run: |
+          mkdir installers
+          bundle=desktop/src-tauri/target/release/bundle
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp $bundle/nsis/*-setup.exe installers/Transcriptor-windows-x64-setup.exe
+          else
+            cp $bundle/appimage/*.AppImage installers/Transcriptor-linux-$(uname -m).AppImage
+            cp $bundle/deb/*.deb installers/Transcriptor-linux-$(dpkg --print-architecture).deb
+          fi
+          ls -l installers
+
+      - name: Test the installers (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- desktop/ci/installed-linux.sh installers
+
+      - name: Test the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: desktop/ci/installed-windows.ps1 installers/Transcriptor-windows-x64-setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transcriptor-${{ matrix.id }}
+          path: installers/*
+          if-no-files-found: error
+
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Three jobs race to create the release; whoever loses finds it there.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "Transcriptor ${GITHUB_REF_NAME#v}" --generate-notes \
+            || gh release view "$GITHUB_REF_NAME" >/dev/null
+          gh release upload "$GITHUB_REF_NAME" installers/* --clobber

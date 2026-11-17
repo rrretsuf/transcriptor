@@ -1,0 +1,47 @@
+[package]
+name = "transcriptor"
+version = "3.0.0"
+description = "Press a hotkey, speak, and the text lands at your cursor."
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "net", "process", "io-util"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "stream", "rustls-no-provider"] }
+futures-util = "0.3"
+cpal = { version = "0.18", features = ["pulseaudio"] }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+dirs = "6"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+keyring = "4"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "UI_ViewManagement"] }
+windows-version = "0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
+ashpd = { version = "0.14", default-features = false, features = ["tokio", "global_shortcuts", "remote_desktop", "screencast", "settings"] }
+gtk = "0.18"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

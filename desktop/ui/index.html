@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transcriptor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg hidden>
+  <symbol id="i-list" viewBox="0 0 20 20"><path d="M4 5.5h12M4 10h12M4 14.5h8" /></symbol>
+  <symbol id="i-record" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" /><circle cx="10" cy="10" r="2.6" class="fill" /></symbol>
+  <symbol id="i-file" viewBox="0 0 20 20"><path d="M6 3.5h5.5L15 7v9.5H6z M11.5 3.5V7H15" /><path d="M8.5 13v-1.5M10.5 14v-3.5M12.5 13v-1.5" /></symbol>
+  <symbol id="i-gear" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.5" /><path d="M10 3v2M10 15v2M3 10h2M15 10h2M5.05 5.05l1.4 1.4M13.55 13.55l1.4 1.4M5.05 14.95l1.4-1.4M13.55 6.45l1.4-1.4" /></symbol>
+  <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4.5 6h11M8 6V4.5h4V6M6 6l.7 9.5h6.6L14 6M8.5 8.5v4.5M11.5 8.5v4.5" /></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="M4.5 10.5l3.5 3.5 7.5-8" /></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><path d="M10 3.5l7 12.5H3z M10 8.5v3.5M10 14.2v.3" /></symbol>
+  <symbol id="i-wave" viewBox="0 0 48 48"><path d="M10 20v8M17 14v20M24 9v30M31 14v20M38 20v8" /></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11" /></symbol>
+  <symbol id="i-x" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" /></symbol>
+</svg>
+
+<!-- First run -->
+<section id="onboarding" hidden>
+  <div class="steps" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+  <div class="step" data-step="key">
+    <svg class="logo"><use href="#i-wave" /></svg>
+    <h1>Speak. It types.</h1>
+    <p class="lead">Transcriptor turns your voice into text at the cursor, in any app. It uses your own Soniox key, so you pay Soniox directly: about $0.12 per hour of speech.</p>
+    <form id="key-form" class="stack">
+      <input id="key-input" type="password" placeholder="Paste your Soniox API key" autocomplete="off" spellcheck="false">
+      <p class="problem" id="key-problem" hidden></p>
+      <button class="primary large" type="submit">Continue</button>
+    </form>
+    <a class="link" data-url="https://console.soniox.com">Get a key at console.soniox.com</a>
+  </div>
+
+  <div class="step" data-step="hotkey" hidden>
+    <h1>Your hotkey</h1>
+    <p class="lead">Press it once to start dictating, and again to stop. It works in every app.</p>
+    <button class="keycap" id="onboarding-hotkey" type="button"></button>
+    <p class="hint" id="onboarding-hotkey-hint">Click the key to change it.</p>
+    <p class="problem" id="onboarding-hotkey-problem" hidden></p>
+    <div class="note" id="wayland-note" hidden></div>
+    <button class="primary large" data-next type="button">Continue</button>
+  </div>
+
+  <div class="step" data-step="try" hidden>
+    <h1>Try it</h1>
+    <p class="lead">Press <kbd class="hotkey-label"></kbd>, say a sentence, then press it again.</p>
+    <textarea id="try-text" rows="4" placeholder="Your words appear here"></textarea>
+    <p class="success" id="try-success" hidden><svg><use href="#i-check" /></svg> It works.</p>
+    <button class="primary large" data-next type="button" id="try-next">Skip for now</button>
+  </div>
+
+  <div class="step" data-step="done" hidden>
+    <svg class="logo done"><use href="#i-check" /></svg>
+    <h1>You are set</h1>
+    <p class="lead">Transcriptor stays in the <span class="tray-name"></span>. Close this window whenever you like; <kbd class="hotkey-label"></kbd> keeps working.</p>
+    <button class="primary large" id="onboarding-finish" type="button">Start using Transcriptor</button>
+  </div>
+</section>
+
+<!-- The app -->
+<div id="shell" hidden>
+  <nav>
+    <button data-view="history" class="selected"><svg><use href="#i-list" /></svg><span>Transcriptions</span></button>
+    <button data-view="meeting"><svg><use href="#i-record" /></svg><span>Meeting</span><i class="live-dot" id="nav-meeting-dot" hidden></i></button>
+    <button data-view="file"><svg><use href="#i-file" /></svg><span>Transcribe File</span></button>
+    <span class="grow"></span>
+    <button id="dictate" class="dictate" type="button"><i class="bars"><b></b><b></b><b></b><b></b><b></b></i><span id="dictate-label">Start Dictation</span><kbd class="hotkey-label"></kbd></button>
+    <button data-view="settings"><svg><use href="#i-gear" /></svg><span>Settings</span></button>
+  </nav>
+
+  <main>
+    <p class="banner" id="banner" hidden></p>
+
+    <section class="view" id="view-history">
+      <header>
+        <h2>Transcriptions</h2>
+        <div class="segmented" id="history-filter">
+          <button data-filter="all" class="selected">All</button>
+          <button data-filter="meeting">Meetings</button>
+        </div>
+        <input type="search" id="history-search" placeholder="Search">
+      </header>
+      <div class="scroll" id="history-list"></div>
+      <div class="empty" id="history-empty" hidden>
+        <svg><use href="#i-wave" /></svg>
+        <h3></h3>
+        <p></p>
+      </div>
+    </section>
+
+    <section class="view" id="view-meeting" hidden>
+      <input class="title-field" id="meeting-title" placeholder="Untitled meeting" spellcheck="false">
+      <div class="stage" id="meeting-idle">
+        <i class="record-dot"></i>
+        <h3>Transcribe a meeting</h3>
+        <p id="meeting-what"></p>
+        <button class="record large" data-meeting="start" type="button">Start Recording</button>
+      </div>
+      <div class="live" id="meeting-live" hidden>
+        <div class="live-head">
+          <i class="record-dot" id="meeting-dot"></i>
+          <strong id="meeting-state"></strong>
+          <span class="grow"></span>
+          <time id="meeting-clock">0:00:00</time>
+        </div>
+        <div class="transcript scroll" id="meeting-text"></div>
+        <p class="problem" id="meeting-problem" hidden></p>
+        <div class="actions center">
+          <button class="large" data-meeting="pause" id="meeting-pause" type="button">Pause</button>
+          <button class="record large" data-meeting="end" id="meeting-end" type="button">End</button>
+        </div>
+      </div>
+      <div class="result" id="meeting-done" hidden>
+        <p class="meta" id="meeting-span"></p>
+        <div class="transcript scroll selectable" id="meeting-final"></div>
+        <div class="actions">
+          <span class="meta" id="meeting-words"></span>
+          <span class="grow"></span>
+          <button class="large" data-meeting="restart" type="button">New Meeting</button>
+          <button class="primary large copy" data-copy="meeting-final" type="button">Copy</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-file" hidden>
+      <button class="drop" id="file-drop" type="button">
+        <svg><use href="#i-wave" /></svg>
+        <strong>Drop audio or video</strong>
+        <span>or click to choose a file</span>
+      </button>
+      <div class="stage" id="file-working" hidden>
+        <i class="bars big"><b></b><b></b><b></b><b></b><b></b></i>
+        <h3 id="file-name"></h3>
+        <p id="file-stage"></p>
+        <button class="large" data-file="reset" type="button">Cancel</button>
+      </div>
+      <div class="result" id="file-done" hidden>
+        <div class="transcript scroll selectable" id="file-text"></div>
+        <div class="actions">
+          <span class="meta" id="file-words"></span>
+          <span class="grow"></span>
+          <button class="large" data-file="reset" type="button">New File</button>
+          <button class="primary large copy" data-copy="file-text" type="button">Copy</button>
+        </div>
+      </div>
+      <div class="stage" id="file-failed" hidden>
+        <svg class="warn"><use href="#i-warn" /></svg>
+        <h3>Could not transcribe</h3>
+        <p id="file-problem"></p>
+        <button class="large" data-file="reset" type="button">Try Another File</button>
+      </div>
+    </section>
+
+    <section class="view" id="view-settings" hidden>
+      <header><h2>Settings</h2></header>
+      <div class="scroll settings">
+        <h4>General</h4>
+        <div class="group">
+          <label class="row"><span>Dictation hotkey<small id="hotkey-problem" class="problem-text" hidden></small></span>
+            <button class="keycap small" id="settings-hotkey" type="button"></button></label>
+          <div class="row"><span>Cancel recording</span><kbd>Esc</kbd></div>
+          <label class="row"><span>Launch at login</span><input type="checkbox" class="switch" data-config="launchAtLogin"></label>
+        </div>
+
+        <h4>Soniox API key</h4>
+        <div class="group">
+          <form class="row" id="settings-key-form">
+            <input type="password" id="settings-key" placeholder="Paste a new key" autocomplete="off" spellcheck="false">
+            <span class="saved" id="settings-key-saved" hidden><svg><use href="#i-check" /></svg> Saved</span>
+            <button type="submit" id="settings-key-save" hidden>Save</button>
+          </form>
+        </div>
+        <p class="footnote" id="key-footnote"></p>
+        <p class="problem" id="settings-key-problem" hidden></p>
+
+        <h4>Dictation</h4>
+        <div class="group">
+          <label class="row"><span>Model</span>
+            <select data-config="model"><option value="stt-rt-v6">Soniox Real-Time v6</option><option value="stt-rt-v5">Soniox Real-Time v5</option></select></label>
+          <div class="row"><span>Languages</span><div class="chips" id="languages"></div></div>
+          <label class="row"><span>Translate to</span><select data-config="translateTo" id="translate-to"></select></label>
+        </div>
+        <p class="footnote">Language hints steer recognition. Leave them empty for auto-detection.</p>
+        <div class="group">
+          <label class="row top"><span>Context<small>Names, products and jargon Soniox should recognize, separated by commas.</small></span>
+            <textarea data-config="context" rows="2" placeholder="Names, products, jargon"></textarea></label>
+        </div>
+        <div class="group">
+          <label class="row"><span>Stop after silence<small>0 keeps recording until you press the hotkey again.</small></span>
+            <span class="unit"><input type="number" min="0" step="100" data-config="silenceStopMs"> ms</span></label>
+          <label class="row"><span>Paste at cursor</span><input type="checkbox" class="switch" data-config="autoPaste"></label>
+          <label class="row"><span>Restore clipboard after paste</span><input type="checkbox" class="switch" data-config="restoreClipboard"></label>
+          <label class="row"><span>Save transcriptions</span><input type="checkbox" class="switch" data-config="saveHistory"></label>
+        </div>
+
+        <h4>Usage</h4>
+        <div class="tiles" id="usage"></div>
+        <p class="footnote" id="about"></p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
