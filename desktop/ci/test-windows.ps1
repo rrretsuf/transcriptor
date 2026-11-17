@@ -35,10 +35,23 @@ $null = $app.Handle
 for ($i = 0; $i -lt 150 -and -not (Test-Path (Join-Path $dir "selftest-ready")); $i++) { Start-Sleep -Milliseconds 200 }
 Start-Sleep -Milliseconds 500
 
-Add-Type -Namespace Native -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);'
+Add-Type -Namespace Native -Name Keys -MemberDefinition @'
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr window, System.Text.StringBuilder text, int max);
+'@
+function Foreground {
+    $title = New-Object System.Text.StringBuilder 256
+    [Native.Keys]::GetWindowText([Native.Keys]::GetForegroundWindow(), $title, 256) | Out-Null
+    $title.ToString()
+}
+if ((Foreground) -ne "Target") { throw "the target window does not have the keyboard, '$(Foreground)' has it" }
+
 $control, $shift, $space, $up = 0x11, 0x10, 0x20, 2
 foreach ($key in $control, $shift, $space) { [Native.Keys]::keybd_event($key, 0, 0, [UIntPtr]::Zero) }
 foreach ($key in $space, $shift, $control) { [Native.Keys]::keybd_event($key, 0, $up, [UIntPtr]::Zero) }
+Start-Sleep -Milliseconds 500
+if ((Foreground) -ne "Target") { throw "the pill took the keyboard: '$(Foreground)' is in front" }
 
 if (-not $app.WaitForExit(90000)) { $app.Kill(); throw "the end-to-end run did not finish" }
 Start-Sleep -Milliseconds 800
