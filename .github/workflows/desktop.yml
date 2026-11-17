@@ -62,12 +62,21 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a dbus-run-session -- desktop/ci/test-linux.sh desktop/src-tauri/target/release/transcriptor
 
-      # GitHub's Windows machines have no sound card; this adds a virtual one so
-      # the loopback that meetings record can be tested.
+      # GitHub's Windows machines have no sound card. VB-CABLE is a virtual one
+      # whose microphone hears what its speaker plays, so the microphone, the
+      # loopback, a dictation and a meeting can be tested for real.
       - name: Virtual sound card (Windows)
         if: runner.os == 'Windows'
         continue-on-error: true
         uses: LABSN/sound-ci-helpers@v1
+
+      - name: Sound service and test tools (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Start-Service Audiosrv
+          pip install websockets
 
       - name: Test the built app (Windows)
         if: runner.os == 'Windows'

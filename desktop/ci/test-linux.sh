@@ -48,4 +48,4 @@ python3 "$HERE/mock-soniox.py" 8765 &
 MOCK=$!
 sleep 1
 SONIOX_API_KEY=mock TRANSCRIPTOR_SONIOX_URL=ws://127.0.0.1:8765 EXPECT=heard "$HERE/e2e-linux.sh" "$BIN"
-kill $MOCK
+kill $MOCK 2>/dev/null || true

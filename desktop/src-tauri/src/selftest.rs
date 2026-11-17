@@ -121,8 +121,10 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         format!("host={} input={:?} output={:?} system_audio={}", devices.host, devices.input, devices.output, devices.system_audio),
     );
 
-    // "mic", "system" or "loopback": the test bench is playing sound there and it must be heard.
+    // "mic", "system" (the speaker only) and "loopback", comma separated: the
+    // test bench is playing sound there and it must be heard.
     let expected = std::env::var("TRANSCRIPTOR_EXPECT_AUDIO").unwrap_or_default();
+    let expects = |what: &str| expected.split(',').any(|part| part == what);
     for (name, system) in [("microphone capture", false), ("microphone + system audio capture", true)] {
         let Ok(Ok((capture, mut chunks))) = tauri::async_runtime::spawn_blocking(move || audio::start(system)).await else {
             report.check(name, expected.is_empty(), "no input device");
@@ -142,8 +144,8 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         }
         drop(capture);
         let heard = loudest > 0.01;
-        let required = (expected == "mic" && !system) || (expected == "system" && system);
-        let silent = expected == "system" && !system;
+        let required = expects("mic") || (expects("system") && system);
+        let silent = expects("system") && !expects("mic") && !system;
         // Words can only appear as fast as the audio arrives: it must flow, not come in bursts.
         let flowing = count > 40 && first < 600 && gap < 400;
         let detail = format!("{count} chunks in 2 s, first after {first} ms, longest gap {gap} ms, loudest rms {loudest:.3}");
@@ -152,8 +154,8 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
 
     let probe = tauri::async_runtime::spawn_blocking(|| audio::probe_system_audio(Duration::from_secs(2))).await.unwrap();
     match probe {
-        Ok(loudest) => report.check("system audio alone", expected != "loopback" || loudest > 0.01, format!("loudest rms {loudest:.3}")),
-        Err(problem) => report.check("system audio alone", expected != "loopback", problem),
+        Ok(loudest) => report.check("system audio alone", !expects("loopback") || loudest > 0.01, format!("loudest rms {loudest:.3}")),
+        Err(problem) => report.check("system audio alone", !expects("loopback"), problem),
     }
 
     let dir = app.dir.clone();
