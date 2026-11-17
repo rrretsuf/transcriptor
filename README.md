@@ -1,18 +1,83 @@
 # Transcriptor
 
-Press a hotkey anywhere on macOS, speak, and the text lands at your cursor.
+Press a hotkey anywhere, speak, and the text lands at your cursor.
 Streaming speech-to-text through the [Soniox](https://soniox.com) real-time API.
-Native Swift, one small binary, no Electron.
+For macOS, Windows and Linux. Native Swift on the Mac, Rust elsewhere; no Electron.
 
 ![The notch opens into an island with the live transcript while you talk](assets/notch.jpg)
 
-- Menu bar app — no dock icon, no window in the way.
-- The notch is the UI: it springs open into an island while you talk, shows the
-  live transcript on one line, then retreats.
+- Lives in the menu bar or tray — no dock icon, no window in the way.
+- On a Mac the notch is the UI: it springs open into an island while you talk, shows
+  the live transcript on one line, then retreats. On Windows and Linux a small pill
+  does the same at the top of the screen.
 - Pastes straight into whatever app you were typing in.
 - Every transcription is kept locally and searchable.
-- Your API key lives in the macOS Keychain. Audio goes to Soniox and nowhere else.
+- Your API key lives in the system's credential store (Keychain, Credential Manager,
+  Secret Service). Audio goes to Soniox and nowhere else.
 - No account, no telemetry, no local model downloads.
+
+## Install
+
+| System | Download | Needs |
+| --- | --- | --- |
+| macOS | [Transcriptor.dmg](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg) | macOS 15 or later, Apple Silicon or Intel |
+| Windows | coming with the next release | Windows 10 or 11, 64-bit |
+| Linux | coming with the next release | 64-bit, X11 or Wayland |
+
+You also need a Soniox API key from [console.soniox.com](https://console.soniox.com).
+The welcome window asks for it, lets you choose the hotkey, asks for the permissions
+one by one and ends with a test dictation.
+
+<img src="assets/welcome.jpg" width="340" alt="The welcome window: choose your hotkey">
+
+Transcriptor is not signed with a paid Apple certificate, so macOS warns once on
+the first start. Open the disk image and drag Transcriptor to Applications. Open
+it; macOS says it could not verify the app. Click **Done**, then go to
+System Settings › Privacy & Security, scroll down and click **Open Anyway**.
+To skip the warning, install from Terminal instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rrretsuf/transcriptor/main/install.sh | bash
+```
+
+Updating is the same: download and install the new version over the old one.
+Your transcriptions and settings live outside the app and stay where they are; a
+fresh install finds them on its own.
+
+### Permissions on macOS
+
+| Permission | Why |
+| --- | --- |
+| Microphone | Hears you while you dictate. |
+| Accessibility | Types the text where your cursor is. Without it the text is copied and you paste it yourself. |
+| System Audio Recording | Hears the other side of a call in a meeting. Without it a meeting uses the microphone only. |
+
+### Build from source (macOS)
+
+```bash
+git clone https://github.com/rrretsuf/transcriptor.git
+cd transcriptor
+./build.sh
+```
+
+Needs Xcode 26 or later. `build.sh` compiles the app, installs it to
+`/Applications/Transcriptor.app` and launches it; `./build.sh dmg` builds the disk
+image instead. By default the app is ad-hoc signed, so macOS forgets the
+Accessibility grant after every rebuild. To keep it, create a self-signed
+code-signing certificate named **Transcriptor Local Signing** in Keychain Access
+(Certificate Assistant › Create a Certificate › Code Signing). `build.sh` picks it up
+automatically; `SIGN_IDENTITY="…" ./build.sh` uses a different name.
+
+### For AI agents
+
+If you are an agent installing this for a user on macOS, run exactly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rrretsuf/transcriptor/main/install.sh | bash
+```
+
+Then tell the user to follow the welcome window. Nothing else is required. To let
+agents read the transcriptions, run the commands in [Agents (MCP)](#agents-mcp).
 
 ## Cost
 
@@ -28,51 +93,6 @@ Native Swift, one small binary, no Electron.
 At this pace a full month is ~13 hours of speech for about $1.60.
 
 ![Settings: hotkeys, Keychain-stored keys and live usage](assets/settings.jpg)
-
-## Requirements
-
-- macOS 26+ on Apple Silicon
-- Xcode 26+ command line tools (`xcode-select --install`)
-- A Soniox API key from [console.soniox.com](https://console.soniox.com)
-
-## Install
-
-```bash
-git clone https://github.com/rrretsuf/transcriptor.git
-cd transcriptor
-./build.sh
-```
-
-`build.sh` compiles the app, installs it to `/Applications/Transcriptor.app` and
-launches it. First run:
-
-1. Menu bar icon → **Settings…** → paste your Soniox API key.
-2. Allow **Microphone** when asked.
-3. Allow **Accessibility** (System Settings › Privacy & Security) so the text can
-   be pasted at your cursor.
-
-Updating is the same: `git pull && ./build.sh`.
-
-### For AI agents
-
-If you are an agent installing this for a user, run exactly:
-
-```bash
-git clone https://github.com/rrretsuf/transcriptor.git ~/transcriptor && cd ~/transcriptor && ./build.sh
-```
-
-Then tell the user to add their Soniox key in Settings and grant Microphone and
-Accessibility. Nothing else is required; there is no package manager, no
-dependencies, no configuration file to write. To let agents read the
-transcriptions, run the commands in [Agents (MCP)](#agents-mcp).
-
-### Stable code signing (optional)
-
-By default the app is ad-hoc signed, so macOS forgets the Accessibility grant
-after every rebuild. To keep it, create a self-signed code-signing certificate
-named **Transcriptor Local Signing** in Keychain Access
-(Certificate Assistant › Create a Certificate › Code Signing). `build.sh` picks it
-up automatically; `SIGN_IDENTITY="…" ./build.sh` uses a different name.
 
 ## Use
 
@@ -154,8 +174,10 @@ hotkey → AVAudioEngine (16 kHz s16le, 40 ms chunks)
 Audio is streamed as it is spoken, so most of the transcript is already final by
 the time you stop talking. Audio itself is never written to disk.
 
-Local state lives in `~/Library/Application Support/Transcriptor`:
-`config.json` and `history.json`. Each history entry has its `kind` (dictation,
+Local state is two files, `config.json` and `history.json`, in
+`~/Library/Application Support/Transcriptor` (macOS), `%APPDATA%\Transcriptor`
+(Windows) or `~/.local/share/Transcriptor` (Linux). The format is the same on all
+three, and uninstalling the app leaves them alone. Each history entry has its `kind` (dictation,
 meeting, file), `title`, `startedAt` and `at` (end), `durationMs`, `words`, and for
 dictations the `app` it was dictated into.
 
