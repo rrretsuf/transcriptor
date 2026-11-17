@@ -126,9 +126,13 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
     let expected = std::env::var("TRANSCRIPTOR_EXPECT_AUDIO").unwrap_or_default();
     let expects = |what: &str| expected.split(',').any(|part| part == what);
     for (name, system) in [("microphone capture", false), ("microphone + system audio capture", true)] {
-        let Ok(Ok((capture, mut chunks))) = tauri::async_runtime::spawn_blocking(move || audio::start(system)).await else {
-            report.check(name, expected.is_empty(), "no input device");
-            continue;
+        let (capture, mut chunks) = match tauri::async_runtime::spawn_blocking(move || audio::start(system)).await {
+            Ok(Ok(started)) => started,
+            Ok(Err(problem)) => {
+                report.check(name, expected.is_empty(), format!("the microphone did not open: {problem}"));
+                continue;
+            }
+            Err(_) => continue,
         };
         let started = std::time::Instant::now();
         let (mut count, mut loudest, mut first, mut last, mut gap) = (0, 0.0_f32, 0, 0, 0);

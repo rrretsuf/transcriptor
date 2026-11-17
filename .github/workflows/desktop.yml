@@ -76,6 +76,10 @@ jobs:
         shell: pwsh
         run: |
           Start-Service Audiosrv
+          # Windows Server ships with microphone access for desktop apps switched off.
+          foreach ($hive in "HKLM", "HKCU") {
+            reg add "$hive\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone" /v Value /t REG_SZ /d Allow /f
+          }
           pip install websockets
 
       - name: Test the built app (Windows)
