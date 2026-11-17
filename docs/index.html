@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transcriptor: press a key, speak, and it is typed</title>
+<meta name="description" content="Dictation for macOS, Windows and Linux. Press a hotkey anywhere, speak, and the text lands at your cursor.">
+<meta property="og:title" content="Transcriptor">
+<meta property="og:description" content="Press a hotkey anywhere, speak, and the text lands at your cursor. For macOS, Windows and Linux.">
+<meta property="og:image" content="https://raw.githubusercontent.com/rrretsuf/transcriptor/main/assets/notch.jpg">
+<link rel="icon" href="icon.png">
+<script>document.documentElement.classList.add('js')</script>
+<style>
+:root {
+    --paper: #eceef1;
+    --ink: #14161a;
+    --muted: #5f6570;
+    --line: #d3d7de;
+    --raised: #f7f8fa;
+    --button: #14161a;
+    --button-ink: #ffffff;
+    --record: #ff3b30;
+    --finish: #ff9f0a;
+    --rounded: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI Variable Display", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
+    --text: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Ubuntu Mono", monospace;
+    color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --paper: #1d1f23;
+        --ink: #f1f2f4;
+        --muted: #9aa1ac;
+        --line: #34373e;
+        --raised: #26282d;
+        --button: #f1f2f4;
+        --button-ink: #14161a;
+    }
+}
+
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body {
+    margin: 0;
+    color: var(--ink);
+    font: 17px/1.5 var(--text);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+a { color: inherit; text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--ink) 55%, transparent); outline-offset: 3px; border-radius: 6px; }
+
+/* The island: the app's own surface, hanging from the top edge of the screen. */
+.island {
+    position: absolute;
+    top: -24px;
+    left: 50%;
+    width: min(400px, calc(100vw - 56px));
+    height: 82px;
+    padding: 24px 18px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #000;
+    border-radius: 0 0 22px 22px;
+    transform: translate(-50%, -100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.island.open {
+    transform: translate(-50%, 0);
+    transition: transform 0.55s cubic-bezier(0.3, 1.45, 0.5, 1);
+}
+.island::before, .island::after {
+    content: "";
+    position: absolute;
+    top: 24px;
+    width: 10px;
+    height: 10px;
+}
+.island::before { left: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, #000 10px); }
+.island::after { right: -10px; background: radial-gradient(circle at 100% 100%, transparent 9.5px, #000 10px); }
+.dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--record);
+    transform: scale(var(--level, 1));
+    transition: transform 0.14s ease-out, background 0.25s ease-out;
+}
+.island.finishing .dot { background: var(--finish); }
+.caption {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    justify-content: flex-end;
+    overflow: hidden;
+    white-space: nowrap;
+    color: #fff;
+    font: 500 13px/1 var(--rounded);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%);
+    mask-image: linear-gradient(90deg, transparent, #000 18%);
+}
+.caption span { margin: 0 auto; }
+.caption .waiting { color: rgba(255, 255, 255, 0.45); }
+
+main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 132px 24px 72px;
+    text-align: center;
+}
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font: 600 1.05rem/1 var(--rounded);
+    letter-spacing: -0.01em;
+}
+.brand img { width: 36px; height: 36px; }
+h1 {
+    margin: 28px 0 0;
+    font: 700 clamp(2.2rem, 7vw, 3.6rem)/1.07 var(--rounded);
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+}
+.caret {
+    display: inline-block;
+    width: 0.07em;
+    height: 0.86em;
+    margin-left: 0.06em;
+    vertical-align: -0.08em;
+    background: var(--ink);
+    animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+.js.intro h1 .words { visibility: hidden; }
+.lede {
+    max-width: 34em;
+    margin: 20px auto 0;
+    color: var(--muted);
+    text-wrap: pretty;
+}
+
+.get { margin-top: 40px; }
+.primary {
+    display: inline-block;
+    min-width: 280px;
+    padding: 17px 34px;
+    border-radius: 999px;
+    background: var(--button);
+    color: var(--button-ink);
+    font: 600 1.12rem/1.2 var(--rounded);
+    text-decoration: none;
+    transition: transform 0.12s ease-out;
+}
+.primary:active { transform: scale(0.98); }
+.primary[aria-disabled="true"] { background: var(--line); color: var(--muted); pointer-events: none; }
+.needs { margin: 14px 0 0; color: var(--muted); font-size: 0.92rem; }
+.note {
+    max-width: 34em;
+    margin: 26px auto 0;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--raised);
+    font-size: 0.92rem;
+    text-align: left;
+    text-wrap: pretty;
+}
+.note p { margin: 0; }
+.note p + p { margin-top: 10px; }
+.command {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 10px 10px 10px 14px;
+    border-radius: 10px;
+    background: var(--paper);
+}
+.command code {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    font: 0.8rem/1.4 var(--mono);
+    scrollbar-width: none;
+}
+.command button {
+    flex: none;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--button);
+    color: var(--button-ink);
+    font: 600 0.8rem/1 var(--text);
+    cursor: pointer;
+}
+
+.systems { margin-top: 56px; text-align: left; }
+.systems ul { margin: 0; padding: 0; list-style: none; }
+.systems h2 { margin: 0 0 6px; font: 600 0.92rem/1.3 var(--text); color: var(--muted); }
+.systems li {
+    display: grid;
+    grid-template-columns: 6.5em 1fr auto;
+    align-items: baseline;
+    gap: 4px 16px;
+    padding: 15px 0;
+    border-top: 1px solid var(--line);
+}
+.systems li:last-child { border-bottom: 1px solid var(--line); }
+.systems .name { font: 600 1rem/1.3 var(--rounded); }
+.systems .req { color: var(--muted); font-size: 0.92rem; }
+.systems .files { display: flex; gap: 16px; font-weight: 600; font-size: 0.95rem; }
+.systems .soon { color: var(--muted); font-weight: 400; }
+.systems .here .name::after {
+    content: "this computer";
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    font: 600 0.68rem/1.5 var(--text);
+    vertical-align: 2px;
+    white-space: nowrap;
+}
+
+footer {
+    margin-top: 48px;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+footer p { margin: 0; }
+footer p + p { margin-top: 6px; }
+
+@media (max-width: 560px) {
+    main { padding-top: 116px; }
+    .primary { min-width: 0; width: 100%; }
+    .systems li { grid-template-columns: 1fr auto; }
+    .systems .req { grid-column: 1 / -1; grid-row: 2; }
+    .systems .here .name::after { content: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .island, .island.open, .dot, .primary { transition: none; }
+    .caret { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="island" aria-hidden="true">
+    <span class="dot"></span>
+    <div class="caption"><span class="waiting">Listening…</span></div>
+</div>
+
+<main>
+    <div class="brand"><img src="icon.png" alt="">Transcriptor</div>
+    <h1><span class="words">Press a key, speak, and the text lands at your cursor.</span><span class="caret" aria-hidden="true"></span></h1>
+    <p class="lede">Dictation for macOS, Windows and Linux. It works in every app, keeps your transcriptions on your computer, and runs on your own Soniox key for about $0.12 per hour of speech.</p>
+
+    <section class="get">
+        <a class="primary" id="primary" href="https://github.com/rrretsuf/transcriptor/releases/latest">Download Transcriptor</a>
+        <p class="needs" id="needs">Choose your system below.</p>
+        <div class="note" id="note" hidden></div>
+    </section>
+
+    <section class="systems">
+        <h2>All downloads</h2>
+        <ul>
+        <li data-os="mac">
+            <span class="name">macOS</span>
+            <span class="req">macOS 15 or later, Apple Silicon and Intel</span>
+            <span class="files"><a data-file="Transcriptor.dmg" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg">Disk image</a></span>
+        </li>
+        <li data-os="windows">
+            <span class="name">Windows</span>
+            <span class="req">Windows 10 or 11, 64-bit</span>
+            <span class="files"><a data-file="Transcriptor-windows-x64-setup.exe" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-windows-x64-setup.exe">Installer</a></span>
+        </li>
+        <li data-os="linux">
+            <span class="name">Linux</span>
+            <span class="req">64-bit, X11 or Wayland</span>
+            <span class="files"><a data-file="Transcriptor-linux-x86_64.AppImage" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-x86_64.AppImage">AppImage</a><a data-file="Transcriptor-linux-amd64.deb" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-amd64.deb">.deb</a></span>
+        </li>
+        </ul>
+    </section>
+
+    <footer>
+        <p><span id="version"></span>You need a Soniox API key; the welcome window shows where to get one.</p>
+        <p><a href="https://github.com/rrretsuf/transcriptor">Source and install notes on GitHub</a></p>
+    </footer>
+</main>
+
+<script>
+const systems = {
+    mac: {
+        label: 'Download for macOS',
+        file: 'Transcriptor.dmg',
+        note: `<p>macOS warns on the first start, because the app has no paid Apple certificate. Click <b>Done</b>, then open System Settings › Privacy &amp; Security and click <b>Open Anyway</b>.</p>
+<p>To skip the warning, install from Terminal:</p>
+<div class="command"><code>curl -fsSL https://raw.githubusercontent.com/rrretsuf/transcriptor/main/install.sh | bash</code><button type="button">Copy</button></div>`,
+    },
+    windows: {
+        label: 'Download for Windows',
+        file: 'Transcriptor-windows-x64-setup.exe',
+        note: `<p>If Windows says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>. The app has no paid Microsoft certificate.</p>`,
+    },
+    linux: {
+        label: 'Download for Linux',
+        file: 'Transcriptor-linux-x86_64.AppImage',
+        note: `<p>Make the AppImage executable, then run it:</p>
+<div class="command"><code>chmod +x Transcriptor-linux-x86_64.AppImage &amp;&amp; ./Transcriptor-linux-x86_64.AppImage</code><button type="button">Copy</button></div>
+<p>On Debian and Ubuntu you can install the .deb from the list below instead.</p>`,
+    },
+};
+
+// ?os=windows shows the page as another system sees it.
+function detect() {
+    const asked = new URLSearchParams(location.search).get('os');
+    if (asked in systems) return asked;
+    const platform = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
+    const agent = navigator.userAgent.toLowerCase();
+    const phone = /android|iphone|ipad|ipod/.test(agent) || (platform.includes('mac') && navigator.maxTouchPoints > 1);
+    if (phone) return null;
+    if (platform.includes('mac')) return 'mac';
+    if (platform.includes('win')) return 'windows';
+    if (platform.includes('linux') || /x11|cros/.test(agent)) return 'linux';
+    return null;
+}
+
+const os = detect();
+const primary = document.getElementById('primary');
+const needs = document.getElementById('needs');
+const note = document.getElementById('note');
+
+if (os) {
+    const row = document.querySelector(`[data-os="${os}"]`);
+    row.classList.add('here');
+    primary.textContent = systems[os].label;
+    primary.href = row.querySelector(`[data-file="${systems[os].file}"]`).href;
+    needs.textContent = row.querySelector('.req').textContent;
+    note.innerHTML = systems[os].note;
+    note.hidden = false;
+} else {
+    needs.textContent = 'Transcriptor is a desktop app. Open this page on your computer, or choose a system below.';
+}
+
+note.addEventListener('click', event => {
+    if (event.target.tagName !== 'BUTTON') return;
+    navigator.clipboard.writeText(event.target.previousElementSibling.textContent).then(() => {
+        event.target.textContent = 'Copied';
+        setTimeout(() => { event.target.textContent = 'Copy'; }, 1400);
+    });
+});
+
+// The latest release decides what can be downloaded today; without an answer the links stay as they are.
+fetch('https://api.github.com/repos/rrretsuf/transcriptor/releases/latest')
+    .then(response => response.ok ? response.json() : Promise.reject())
+    .then(release => {
+        const assets = new Map(release.assets.map(asset => [asset.name, asset]));
+        document.getElementById('version').textContent = `Version ${release.tag_name.replace(/^v/, '')}. `;
+        for (const link of document.querySelectorAll('[data-file]')) {
+            const asset = assets.get(link.dataset.file);
+            if (asset) {
+                link.href = asset.browser_download_url;
+                link.title = `${(asset.size / 1048576).toFixed(1)} MB`;
+            } else {
+                const soon = document.createElement('span');
+                soon.className = 'soon';
+                soon.textContent = link.parentElement.querySelector('.soon') ? '' : 'coming soon';
+                link.replaceWith(soon);
+            }
+        }
+        if (!os) return;
+        const asset = assets.get(systems[os].file);
+        if (asset) {
+            primary.href = asset.browser_download_url;
+        } else {
+            primary.textContent = `${systems[os].label.replace('Download for ', '')} is coming soon`;
+            primary.setAttribute('aria-disabled', 'true');
+            primary.removeAttribute('href');
+            note.hidden = true;
+        }
+    })
+    .catch(() => {});
+
+// One dictation on load: the island opens, hears the headline, and the headline lands at the caret.
+const root = document.documentElement;
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    root.classList.add('intro');
+    const island = document.querySelector('.island');
+    const caption = island.querySelector('.caption span');
+    const dot = island.querySelector('.dot');
+    const words = document.querySelector('h1 .words').textContent.split(' ');
+    const wait = ms => new Promise(done => setTimeout(done, ms));
+    (async () => {
+        await wait(350);
+        island.classList.add('open');
+        await wait(750);
+        caption.className = '';
+        caption.textContent = '';
+        for (const word of words) {
+            caption.textContent += (caption.textContent ? ' ' : '') + word;
+            dot.style.setProperty('--level', (1.15 + Math.random() * 0.7).toFixed(2));
+            await wait(95 + word.length * 16);
+        }
+        dot.style.setProperty('--level', 1);
+        island.classList.add('finishing');
+        await wait(520);
+        island.classList.remove('open');
+        root.classList.remove('intro');
+    })();
+}
+</script>
+</body>
+</html>
