@@ -14,6 +14,7 @@ $box.Multiline = $true
 $box.Dock = "Fill"
 $form.Controls.Add($box)
 $box.Add_TextChanged({ Set-Content -Path $Out -Value $box.Text -NoNewline })
+$box.Add_KeyDown({ Add-Content -Path "$Out.keys" -Value "$($_.KeyData)" })
 $form.Add_Shown({
     # Windows only lets a process take the foreground right after input; a tap on Alt counts.
     [Native.Window]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)

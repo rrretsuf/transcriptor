@@ -57,8 +57,10 @@ if (-not $app.WaitForExit(90000)) { $app.Kill(); throw "the end-to-end run did n
 Start-Sleep -Milliseconds 800
 Get-Content (Join-Path $dir "selftest.txt") | Write-Host
 $text = if (Test-Path $typed) { Get-Content $typed -Raw } else { "" }
-Stop-Process -Id $target.Id -Force
 Write-Host "typed into the other app: $text"
+Write-Host "keys the other app saw: $(if (Test-Path "$typed.keys") { (Get-Content "$typed.keys") -join ' | ' })"
+Write-Host "clipboard: $(Get-Clipboard)   in front: $(Foreground)"
+Stop-Process -Id $target.Id -Force
 if ($app.ExitCode -ne 0) { throw "end-to-end self-test failed" }
 if ($text -notmatch "Hello from Transcriptor") { throw "the text did not arrive in the other app" }
 Write-Host "ok   hotkey -> pill -> paste into another app"

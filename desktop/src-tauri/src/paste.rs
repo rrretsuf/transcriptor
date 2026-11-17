@@ -55,8 +55,8 @@ pub async fn paste_at_cursor(text: &str, auto_paste: bool, restore_clipboard: bo
 #[cfg(target_os = "windows")]
 async fn send_paste_keys() -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
-        VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+        GetAsyncKeyState, MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        MAPVK_VK_TO_VSC, VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
     };
     // A modifier still held from the hotkey would turn Ctrl+V into another shortcut.
     let held = || [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|key| unsafe { GetAsyncKeyState(i32::from(key.0)) } < 0);
@@ -66,9 +66,17 @@ async fn send_paste_keys() -> bool {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    // With the scan code as a real keyboard sends it: some apps read that, not the virtual key.
     let key = |vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
         r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: flags, ..Default::default() } },
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: unsafe { MapVirtualKeyW(u32::from(vk.0), MAPVK_VK_TO_VSC) } as u16,
+                dwFlags: flags,
+                ..Default::default()
+            },
+        },
     };
     let inputs = [
         key(VK_CONTROL, KEYBD_EVENT_FLAGS(0)),
