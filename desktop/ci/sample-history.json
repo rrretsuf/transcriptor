@@ -1,0 +1,6 @@
+[
+  {"id": "1", "text": "Can you send me the latest numbers before the call on Thursday? I want to go through them with Filip first.", "at": 1794940800000, "durationMs": 6200, "words": 20, "kind": "dictation", "app": "Slack"},
+  {"id": "2", "title": "Weekly standup", "text": "Speaker 1: Let's start with the release. Where are we on the Windows build?\n\nSpeaker 2: The installer is done, we are testing the hotkey on a few machines today.", "at": 1794937200000, "startedAt": 1794935370000, "durationMs": 1830000, "words": 2840, "kind": "meeting"},
+  {"id": "3", "title": "interview-anna.m4a", "text": "Thanks for making the time. I wanted to ask how your team decides what to build next.", "at": 1794854400000, "durationMs": 754000, "words": 1904, "kind": "file"},
+  {"id": "4", "text": "Zdravo, a lahko jutri ob desetih? Prej imam še en sestanek.", "at": 1794850800000, "durationMs": 3900, "words": 11, "kind": "dictation", "app": "firefox"}
+]

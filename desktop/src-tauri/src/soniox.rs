@@ -165,6 +165,20 @@ async fn next_message<S: Stream + Unpin>(stream: &mut Option<S>) -> Option<S::It
 pub async fn run_session(
     config: Config,
     api_key: String,
+    capture: Capture,
+    chunks: UnboundedReceiver<Chunk>,
+    control: UnboundedReceiver<Control>,
+    emit: impl Fn(Event),
+) {
+    // The end-to-end tests point this at a local stand-in for Soniox.
+    let url = std::env::var("TRANSCRIPTOR_SONIOX_URL").unwrap_or(URL.into());
+    session(&url, config, api_key, capture, chunks, control, emit).await
+}
+
+async fn session(
+    url: &str,
+    config: Config,
+    api_key: String,
     mut capture: Capture,
     mut chunks: UnboundedReceiver<Chunk>,
     mut control: UnboundedReceiver<Control>,
@@ -185,8 +199,6 @@ pub async fn run_session(
     let mut finish_deadline: Option<tokio::time::Instant> = None;
     let config_json = serde_json::to_string(&config_message(&api_key, &config)).unwrap_or_default();
 
-    // The end-to-end tests point this at a local stand-in for Soniox.
-    let url = std::env::var("TRANSCRIPTOR_SONIOX_URL").unwrap_or(URL.into());
     let connect = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(url));
     tokio::pin!(connect);
     let mut connecting = true;
@@ -426,6 +438,149 @@ mod tests {
         assert_eq!(collapse("a\t\tb"), "a b");
         assert_eq!(collapse(""), "");
         assert_eq!(collapse("one. \n\nSpeaker 2:  two \n three"), "one.\n\nSpeaker 2: two\n\nthree");
+    }
+
+    /* A local socket that behaves like Soniox, to run whole sessions against. */
+
+    struct Seen {
+        config: Value,
+        audio_bytes: usize,
+        terminated: bool,
+    }
+
+    async fn soniox_stand_in(replies: &'static [&'static str]) -> (String, tokio::task::JoinHandle<Seen>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let served = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let config = serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+            let mut seen = Seen { config, audio_bytes: 0, terminated: false };
+            while let Some(Ok(message)) = socket.next().await {
+                match message {
+                    Message::Binary(audio) => seen.audio_bytes += audio.len(),
+                    Message::Text(text) if text.is_empty() => {
+                        seen.terminated = true;
+                        for reply in replies {
+                            socket.send(Message::text(*reply)).await.unwrap();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            seen
+        });
+        (url, served)
+    }
+
+    struct Run {
+        chunks: Option<tokio::sync::mpsc::UnboundedSender<Chunk>>,
+        control: Option<tokio::sync::mpsc::UnboundedSender<Control>>,
+        done: tokio::task::JoinHandle<Vec<(String, Option<String>)>>,
+    }
+
+    /// Starts a session whose microphone is `chunks`; stopping the capture ends that stream.
+    fn start(url: String, config: Config) -> Run {
+        let (chunks, chunks_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (control, control_rx) = tokio::sync::mpsc::unbounded_channel();
+        let microphone = std::sync::Arc::new(std::sync::Mutex::new(Some(chunks.clone())));
+        let capture = Capture::new(move || drop(microphone.lock().unwrap().take()));
+        let done = tokio::spawn(async move {
+            let results = std::sync::Mutex::new(Vec::new());
+            session(&url, config, "key".into(), capture, chunks_rx, control_rx, |event| {
+                if let Event::Done { text, error, .. } = event {
+                    results.lock().unwrap().push((text, error));
+                }
+            })
+            .await;
+            results.into_inner().unwrap()
+        });
+        Run { chunks: Some(chunks), control: Some(control), done }
+    }
+
+    fn audio(run: &Run, chunks: usize) {
+        for _ in 0..chunks {
+            run.chunks.as_ref().unwrap().send(Chunk { pcm: vec![0; CHUNK_BYTES], rms: 0.1 }).unwrap();
+        }
+    }
+
+    const WORDS: &[&str] = &[
+        r#"{"tokens":[{"text":"Hello","is_final":true},{"text":" wor","is_final":false}]}"#,
+        r#"{"tokens":[{"text":" world","is_final":true},{"text":"<end>","is_final":true}]}"#,
+        r#"{"tokens":[],"finished":true}"#,
+    ];
+
+    #[tokio::test]
+    async fn a_session_sends_config_then_audio_then_the_terminator() {
+        let (url, served) = soniox_stand_in(WORDS).await;
+        let mut run = start(url, Config { label_speakers: true, ..Config::default() });
+        audio(&run, 5); // before the socket is open: queued, not lost
+        run.control.as_ref().unwrap().send(Control::Stop).unwrap();
+        run.chunks = None;
+        assert_eq!(run.done.await.unwrap(), [("Hello world".to_string(), None)]);
+        let seen = served.await.unwrap();
+        assert_eq!(seen.config["api_key"], "key");
+        assert_eq!(seen.config["enable_speaker_diarization"], true);
+        assert_eq!(seen.audio_bytes, 5 * CHUNK_BYTES);
+        assert!(seen.terminated);
+    }
+
+    #[tokio::test]
+    async fn the_last_words_arrive_after_the_owner_lets_go() {
+        // A paused meeting drops its handle on the segment right after Stop.
+        let (url, _served) = soniox_stand_in(WORDS).await;
+        let mut run = start(url, Config::default());
+        audio(&run, 2);
+        run.control.take().unwrap().send(Control::Stop).unwrap();
+        run.chunks = None;
+        assert_eq!(run.done.await.unwrap(), [("Hello world".to_string(), None)]);
+    }
+
+    #[tokio::test]
+    async fn cancel_and_an_abandoned_session_report_nothing() {
+        let (url, _served) = soniox_stand_in(WORDS).await;
+        let run = start(url.clone(), Config::default());
+        audio(&run, 2);
+        run.control.as_ref().unwrap().send(Control::Cancel).unwrap();
+        assert!(run.done.await.unwrap().is_empty());
+
+        let (url, _served) = soniox_stand_in(WORDS).await;
+        let mut run = start(url, Config::default());
+        run.control = None;
+        assert!(run.done.await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn nothing_captured_ends_quietly() {
+        let (url, _served) = soniox_stand_in(WORDS).await;
+        let mut run = start(url, Config::default());
+        run.control.as_ref().unwrap().send(Control::Stop).unwrap();
+        run.chunks = None;
+        assert_eq!(run.done.await.unwrap(), [(String::new(), None)]);
+    }
+
+    #[tokio::test]
+    async fn a_soniox_error_keeps_what_was_transcribed() {
+        let replies: &[&str] = &[
+            r#"{"tokens":[{"text":"Hello","is_final":true}]}"#,
+            r#"{"error_code":503,"error_message":"Service overloaded"}"#,
+        ];
+        let (url, _served) = soniox_stand_in(replies).await;
+        let mut run = start(url, Config::default());
+        audio(&run, 2);
+        run.control.as_ref().unwrap().send(Control::Stop).unwrap();
+        run.chunks = None;
+        assert_eq!(run.done.await.unwrap(), [("Hello".to_string(), Some("Service overloaded".to_string()))]);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_server_is_reported() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let run = start(url, Config::default());
+        audio(&run, 1);
+        assert_eq!(run.done.await.unwrap(), [(String::new(), Some("Soniox unreachable".to_string()))]);
     }
 
     #[test]

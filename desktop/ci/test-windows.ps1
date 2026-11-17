@@ -10,6 +10,7 @@ $Exe = (Resolve-Path $Exe).Path
 function Run-App([string]$Mode, [string]$DataDir, [int]$Seconds) {
     $env:TRANSCRIPTOR_DATA_DIR = $DataDir
     $app = Start-Process $Exe -ArgumentList $Mode -PassThru
+    $null = $app.Handle # without the handle PowerShell cannot read the exit code later
     if (-not $app.WaitForExit($Seconds * 1000)) { $app.Kill(); throw "$Mode did not finish in $Seconds s" }
     Get-Content (Join-Path $DataDir "selftest.txt")
     return $app.ExitCode
@@ -30,6 +31,7 @@ if (-not (Test-Path "$typed.ready")) { throw "the target window did not open" }
 
 $env:TRANSCRIPTOR_DATA_DIR = $dir
 $app = Start-Process $Exe -ArgumentList "--selftest-e2e" -PassThru
+$null = $app.Handle
 for ($i = 0; $i -lt 150 -and -not (Test-Path (Join-Path $dir "selftest-ready")); $i++) { Start-Sleep -Milliseconds 200 }
 Start-Sleep -Milliseconds 500
 

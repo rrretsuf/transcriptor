@@ -95,6 +95,8 @@ pub fn create_windows(handle: &AppHandle) -> tauri::Result<()> {
 pub fn show_main(app: &Arc<App>, view: &str) {
     let Some(window) = app.handle.get_webview_window("main") else { return };
     if !view.is_empty() {
+        // A page that is still loading misses the event and asks for the view in its first snapshot.
+        *app.view.lock().unwrap() = view.to_string();
         let _ = window.emit("navigate", view);
     }
     let _ = window.unminimize();
@@ -182,6 +184,7 @@ fn tray_image(active: bool) -> Image<'static> {
 pub fn create_tray(app: &Arc<App>) -> tauri::Result<()> {
     let handle = &app.handle;
     let item = |id: &str, text: &str| MenuItem::with_id(handle, id, text, true, None::<&str>);
+    let open = item("open", "Open Transcriptor")?;
     let toggle = item("toggle", "Start Dictation")?;
     let copy_last = item("copy-last", "Copy Last Transcription")?;
     let file = item("file", "Transcribe File…")?;
@@ -192,7 +195,7 @@ pub fn create_tray(app: &Arc<App>) -> tauri::Result<()> {
     let separator = || PredefinedMenuItem::separator(handle);
     let menu = Menu::with_items(
         handle,
-        &[&toggle, &copy_last, &separator()?, &file, &meeting, &separator()?, &history, &settings, &separator()?, &quit],
+        &[&open, &separator()?, &toggle, &copy_last, &separator()?, &file, &meeting, &separator()?, &history, &settings, &separator()?, &quit],
     )?;
 
     let on_menu = app.clone();
@@ -205,6 +208,7 @@ pub fn create_tray(app: &Arc<App>) -> tauri::Result<()> {
         .on_menu_event(move |handle, event| {
             let app = &on_menu;
             match event.id.as_ref() {
+                "open" => show_main(app, ""),
                 "toggle" => app.toggle(),
                 "copy-last" => {
                     let last = app.store.lock().unwrap().last_transcript.clone();

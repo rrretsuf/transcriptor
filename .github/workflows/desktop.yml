@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev \
-            xvfb openbox xdotool zenity dbus-x11 gnome-keyring pulseaudio pulseaudio-utils espeak-ng
+            xvfb openbox xdotool zenity dbus-x11 gnome-keyring pulseaudio pulseaudio-utils espeak-ng imagemagick
           pip install websockets
 
       - uses: dtolnay/rust-toolchain@stable
@@ -65,6 +65,23 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: desktop/ci/test-windows.ps1 desktop/src-tauri/target/release/transcriptor.exe
+
+      - name: Screenshots (Linux)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: xvfb-run -a -s "-screen 0 1280x800x24" dbus-run-session -- desktop/ci/screens-linux.sh desktop/src-tauri/target/release/transcriptor screens
+
+      - name: Screenshots (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: desktop/ci/screens-windows.ps1 desktop/src-tauri/target/release/transcriptor.exe screens
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-${{ runner.os }}
+          path: screens/*
+          if-no-files-found: warn
 
       - name: Collect installers
         run: |

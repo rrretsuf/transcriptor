@@ -38,8 +38,10 @@ function accelerator(event) {
   return [...parts, key].join("+");
 }
 
+let hotkeyRefused = "";
+
 /** Click, press the combination, done. Escape leaves it as it was. */
-function hotkeyRecorder(button, problem) {
+function hotkeyRecorder(button) {
   const render = () => {
     button.textContent = snapshot.hotkeyLabel;
     button.classList.remove("recording");
@@ -59,10 +61,9 @@ function hotkeyRecorder(button, problem) {
     stop();
     try {
       await invoke("save_config", { config: { ...snapshot.config, hotkey } });
-      show(problem, false);
+      hotkeyRefused = "";
     } catch (message) {
-      problem.textContent = message;
-      show(problem, true);
+      hotkeyRefused = message;
     }
     await refresh();
   };
@@ -92,11 +93,10 @@ function renderHotkey() {
   show(note, wayland || snapshot.desktopOwnsHotkey);
   show($("onboarding-hotkey"), !wayland);
   show($("onboarding-hotkey-hint"), !wayland && !snapshot.desktopOwnsHotkey);
-  const text = wayland ? `Bind a key to: ${snapshot.toggleCommand}` : snapshot.hotkeyProblem;
+  const problem = wayland ? `Bind a key to: ${snapshot.toggleCommand}` : hotkeyRefused || snapshot.hotkeyProblem;
   for (const id of ["hotkey-problem", "onboarding-hotkey-problem"]) {
-    if (!snapshot.hotkeyProblem) continue;
-    $(id).textContent = text;
-    show($(id), !(wayland && id.startsWith("onboarding")));
+    $(id).textContent = problem ?? "";
+    show($(id), Boolean(problem) && !(wayland && id.startsWith("onboarding")));
   }
 }
 
@@ -485,7 +485,7 @@ async function refresh() {
 async function start() {
   snapshot = await invoke("snapshot");
   applyAppearance();
-  renderHotkeys.push(hotkeyRecorder($("settings-hotkey"), $("hotkey-problem")), hotkeyRecorder($("onboarding-hotkey"), $("onboarding-hotkey-problem")));
+  renderHotkeys.push(hotkeyRecorder($("settings-hotkey")), hotkeyRecorder($("onboarding-hotkey")));
   setUpOnboarding();
   setUpHistory();
   setUpMeeting();
@@ -513,6 +513,7 @@ async function start() {
   if (snapshot.unreadable.length) {
     banner(`Your ${snapshot.unreadable.join(" and ")} file could not be read. It is kept as it is and will not be overwritten.`);
   }
+  navigate(snapshot.view);
   const onboarding = !snapshot.config.onboarded;
   show($("onboarding"), onboarding);
   show($("shell"), !onboarding);

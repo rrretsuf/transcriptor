@@ -46,6 +46,8 @@ pub struct App {
     pub hotkey_problem: Mutex<Option<String>>,
     /// On Wayland the desktop owns the key; this is the one it bound.
     pub portal_hotkey: Mutex<Option<String>>,
+    /// The view the window was last asked to show.
+    pub view: Mutex<String>,
     key: Mutex<Option<String>>,
     dictation: Mutex<Dictation>,
     pill: AtomicU64,
@@ -62,6 +64,7 @@ impl App {
             file: Mutex::new(FileJob { status: json!({ "status": "idle" }), task: None }),
             hotkey_problem: Mutex::new(None),
             portal_hotkey: Mutex::new(None),
+            view: Mutex::new(String::new()),
             key: Mutex::new(None),
             dictation: Mutex::new(Dictation { phase: Phase::Idle, control: None, target: None, generation: 0 }),
             pill: AtomicU64::new(0),

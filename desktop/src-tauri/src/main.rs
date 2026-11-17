@@ -43,6 +43,7 @@ async fn snapshot(app: AppState<'_>) -> Result<Value, String> {
         "hotkeyProblem": *app.hotkey_problem.lock().unwrap(),
         "desktopOwnsHotkey": app.portal_hotkey.lock().unwrap().is_some(),
         "toggleCommand": format!("{} --toggle", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("transcriptor".into())),
+        "view": *app.view.lock().unwrap(),
         "hasKey": has_key,
         "unreadable": app.unreadable,
         "systemAudio": system_audio,
@@ -229,6 +230,11 @@ fn bind_desktop_hotkey(app: &Arc<App>) {
     });
 }
 
+/// `--show settings` opens the window on that view.
+fn view_argument(args: &[String]) -> String {
+    args.iter().position(|a| a == "--show").and_then(|at| args.get(at + 1)).cloned().unwrap_or_default()
+}
+
 fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -240,7 +246,7 @@ fn main() {
     linux::prefer_xwayland();
 
     let selftest = has("--selftest").then(|| selftest::Mode::Checks).or(has("--selftest-e2e").then(|| selftest::Mode::EndToEnd));
-    let (hidden, toggle_on_launch) = (has("--hidden"), has("--toggle"));
+    let (hidden, toggle_on_launch, view) = (has("--hidden"), has("--toggle"), view_argument(&args));
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|handle, args, _| {
@@ -248,7 +254,7 @@ fn main() {
             if args.iter().any(|a| a == "--toggle") {
                 app.toggle();
             } else {
-                shell::show_main(&app, "");
+                shell::show_main(&app, &view_argument(&args));
             }
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -297,7 +303,7 @@ fn main() {
             if toggle_on_launch {
                 app.toggle();
             } else if !hidden || !app.config().onboarded {
-                shell::show_main(&app, "");
+                shell::show_main(&app, &view);
             }
             Ok(())
         });

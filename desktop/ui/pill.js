@@ -7,7 +7,7 @@ const bars = [...$("bars").children];
 function setText(final, partial) {
   $("final").textContent = final;
   $("partial").textContent = partial;
-  const width = final || partial ? Math.ceil($("line").getBoundingClientRect().width) : 0;
+  const width = final || partial ? $("line").offsetWidth : 0;
   $("text").style.width = `${Math.min(width, MAX_TEXT)}px`;
   $("text").classList.toggle("clipped", width > MAX_TEXT);
 }
