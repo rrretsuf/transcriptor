@@ -100,11 +100,24 @@ if ($report -match "input=None|output=None") {
 # This part depends on a virtual sound card that CI installs. When it does not
 # work there, that says nothing about the app: the run stays green and the log
 # says NOT VERIFIED in capitals.
-$sound = Get-ChildItem "$env:WINDIR\Media\*.wav" | Sort-Object Length -Descending | Select-Object -First 1
-$player = New-Object System.Media.SoundPlayer $sound.FullName
-$player.PlayLooping()
+$player = $null
 try {
-    Write-Host "== self-test with $($sound.Name) playing: the microphone and the loopback must hear it"
+    # A steady tone: the system sounds have quiet moments, and a quiet moment reads as "not heard".
+    $tone = Join-Path $env:TEMP "transcriptor-tone-$PID.wav"
+    $rate = 16000
+    $samples = $rate * 2
+    $writer = New-Object System.IO.BinaryWriter ([System.IO.File]::Create($tone))
+    $writer.Write([char[]]"RIFF"); $writer.Write([int](36 + $samples * 2)); $writer.Write([char[]]"WAVEfmt ")
+    $writer.Write([int]16); $writer.Write([int16]1); $writer.Write([int16]1); $writer.Write([int]$rate)
+    $writer.Write([int]($rate * 2)); $writer.Write([int16]2); $writer.Write([int16]16)
+    $writer.Write([char[]]"data"); $writer.Write([int]($samples * 2))
+    for ($i = 0; $i -lt $samples; $i++) { $writer.Write([int16](12000 * [Math]::Sin(2 * [Math]::PI * 440 * $i / $rate))) }
+    $writer.Close()
+    $player = New-Object System.Media.SoundPlayer $tone
+    $player.PlayLooping()
+    Start-Sleep -Seconds 1
+
+    Write-Host "== self-test with a tone playing: the microphone and the loopback must hear it"
     $env:TRANSCRIPTOR_EXPECT_AUDIO = "mic,loopback"
     Self-Test "sound" | Out-Null
     Remove-Item Env:TRANSCRIPTOR_EXPECT_AUDIO
@@ -120,5 +133,5 @@ try {
 } catch {
     Write-Host "NOT VERIFIED ON THIS MACHINE: microphone, loopback, dictation and meeting ($_)"
 } finally {
-    $player.Stop()
+    if ($player) { $player.Stop() }
 }
