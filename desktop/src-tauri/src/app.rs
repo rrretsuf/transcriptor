@@ -111,7 +111,12 @@ impl App {
         if hotkey::usable(&hotkey) { hotkey } else { DEFAULT_HOTKEY.into() }
     }
 
+    /// Empty when this desktop gives the app no global key: the user binds
+    /// `transcriptor --toggle` to one of their own.
     pub fn hotkey_label(&self) -> String {
+        if self.hotkey_problem.lock().unwrap().as_deref() == Some("wayland") {
+            return String::new();
+        }
         self.portal_hotkey.lock().unwrap().clone().filter(|label| !label.is_empty()).unwrap_or_else(|| hotkey::display(&self.hotkey()))
     }
 

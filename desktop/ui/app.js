@@ -43,9 +43,9 @@ let hotkeyRefused = "";
 /** Click, press the combination, done. Escape leaves it as it was. */
 function hotkeyRecorder(button) {
   const render = () => {
-    button.textContent = snapshot.hotkeyLabel;
+    button.textContent = snapshot.hotkeyLabel || "Set in system settings";
     button.classList.remove("recording");
-    button.disabled = snapshot.desktopOwnsHotkey;
+    button.disabled = snapshot.desktopOwnsHotkey || !snapshot.hotkeyLabel;
   };
   const stop = () => {
     removeEventListener("keydown", onKey, true);
@@ -81,7 +81,7 @@ const renderHotkeys = [];
 
 function renderHotkey() {
   renderHotkeys.forEach((render) => render());
-  all(".hotkey-label").forEach((label) => { label.textContent = snapshot.hotkeyLabel; });
+  all(".hotkey-label").forEach((label) => { label.textContent = snapshot.hotkeyLabel || "your shortcut"; });
   const wayland = snapshot.hotkeyProblem === "wayland";
   const note = $("wayland-note");
   if (wayland) {
@@ -225,7 +225,7 @@ function renderHistory() {
   if (matches.length) return;
   const [title, text] = query ? [`No results for “${query}”`, "Check the spelling or try another word."]
     : filter === "meeting" ? ["No meetings", "Start one from Meeting in the sidebar."]
-    : ["No transcriptions", `Press ${snapshot.hotkeyLabel} and start talking.`];
+    : ["No transcriptions", `Press ${snapshot.hotkeyLabel || "your shortcut"} and start talking.`];
   $("history-empty").querySelector("h3").textContent = title;
   $("history-empty").querySelector("p").textContent = text;
 }

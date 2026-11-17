@@ -60,6 +60,13 @@ $text = if (Test-Path $typed) { Get-Content $typed -Raw } else { "" }
 Write-Host "typed into the other app: $text"
 Write-Host "keys the other app saw: $(if (Test-Path "$typed.keys") { (Get-Content "$typed.keys") -join ' | ' })"
 Write-Host "clipboard: $(Get-Clipboard)   in front: $(Foreground)"
+if ($text -notmatch "Hello from Transcriptor") {
+    # Tells a broken paste in the app from a test bench that cannot take input at all.
+    foreach ($key in $control, 0x56) { [Native.Keys]::keybd_event($key, 0, 0, [UIntPtr]::Zero) }
+    foreach ($key in 0x56, $control) { [Native.Keys]::keybd_event($key, 0, $up, [UIntPtr]::Zero) }
+    Start-Sleep -Milliseconds 800
+    Write-Host "after Ctrl+V from this script: $(if (Test-Path $typed) { Get-Content $typed -Raw })   keys: $(if (Test-Path "$typed.keys") { (Get-Content "$typed.keys") -join ' | ' })"
+}
 Stop-Process -Id $target.Id -Force
 if ($app.ExitCode -ne 0) { throw "end-to-end self-test failed" }
 if ($text -notmatch "Hello from Transcriptor") { throw "the text did not arrive in the other app" }

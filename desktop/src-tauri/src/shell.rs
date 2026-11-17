@@ -250,7 +250,7 @@ pub fn state_changed(app: &Arc<App>) {
             Phase::Finishing => "Finishing…",
             Phase::Idle => "Start Dictation",
         };
-        let _ = tray.toggle.set_text(format!("{label}    {}", app.hotkey_label()));
+        let _ = tray.toggle.set_text(format!("{label}    {}", app.hotkey_label()).trim_end());
         let _ = tray.toggle.set_enabled(phase != Phase::Finishing);
         let _ = tray.copy_last.set_enabled(has_last);
         let _ = tray.meeting.set_text(if meeting_active { "Show Meeting" } else { "Start Meeting Transcription" });
