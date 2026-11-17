@@ -98,6 +98,15 @@ final class AppState {
     // tap:<modifier>:<count> needs a CGEvent watcher; Carbon cannot express it.
     private func applyTapWatcher() {
         guard let wanted = Hotkeys.parseTap(config.hotkey) else { return tapWatcher.stop() }
+        // An event tap opened without Accessibility makes macOS ask for Input
+        // Monitoring instead. The welcome window registers again once it is granted.
+        guard Permission.accessibility.granted else {
+            if config.onboarded {
+                notify("Hotkey needs Accessibility",
+                       "Allow Transcriptor under Privacy › Accessibility, then start it again.")
+            }
+            return tapWatcher.stop()
+        }
         tapWatcher.onTap = { [weak self] modifier, count in
             guard modifier == wanted.modifier, count >= wanted.count else { return false }
             self?.toggle()

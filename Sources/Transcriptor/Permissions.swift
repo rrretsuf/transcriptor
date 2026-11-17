@@ -10,6 +10,8 @@ import AVFoundation
 enum Permission: CaseIterable {
     case microphone, accessibility, systemAudio
 
+    private static var accessibilityAsked = false
+
     var granted: Bool {
         switch self {
         case .microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
@@ -29,14 +31,20 @@ enum Permission: CaseIterable {
                 openSettings()
             }
         case .accessibility:
+            // The system dialog appears once per launch; a second ask goes straight to the pane.
+            guard !Self.accessibilityAsked else { return openSettings() }
+            Self.accessibilityAsked = true
             // The literal is the documented value of kAXTrustedCheckOptionPrompt,
             // which Swift 6 refuses to read as a global var.
             AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         case .systemAudio:
-            guard let request = TCC.request, TCC.preflight?(TCC.audioCapture, nil) != 1 else { return openSettings() }
+            // Refused earlier: macOS will not ask again, only the pane can change it.
+            guard let request = TCC.request, TCC.preflight?(TCC.audioCapture, nil) == 2 else { return openSettings() }
             await withCheckedContinuation { done in
                 request(TCC.audioCapture, nil) { _ in done.resume() }
             }
+            // Still unanswered means no prompt came up.
+            if TCC.preflight?(TCC.audioCapture, nil) == 2 { openSettings() }
         }
     }
 
