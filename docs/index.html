@@ -3,413 +3,117 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Transcriptor: press a key, speak, and it is typed</title>
-<meta name="description" content="Dictation for macOS, Windows and Linux. Press a hotkey anywhere, speak, and the text lands at your cursor.">
+<title>Transcriptor</title>
+<meta name="description" content="Press a key, speak, and the text lands at your cursor. Dictation for macOS, Windows and Linux.">
 <meta property="og:title" content="Transcriptor">
-<meta property="og:description" content="Press a hotkey anywhere, speak, and the text lands at your cursor. For macOS, Windows and Linux.">
+<meta property="og:description" content="Press a key, speak, and the text lands at your cursor. For macOS, Windows and Linux.">
 <meta property="og:image" content="https://raw.githubusercontent.com/rrretsuf/transcriptor/main/assets/notch.jpg">
 <link rel="icon" href="icon.png">
-<script>document.documentElement.classList.add('js')</script>
 <style>
 :root {
-    --paper: #eceef1;
-    --ink: #14161a;
-    --muted: #5f6570;
-    --line: #d3d7de;
-    --raised: #f7f8fa;
-    --button: #14161a;
-    --button-ink: #ffffff;
-    --record: #ff3b30;
-    --finish: #ff9f0a;
-    --rounded: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI Variable Display", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
-    --text: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Ubuntu Mono", monospace;
+    --paper: #ffffff;
+    --ink: #111214;
+    --muted: #6b7079;
+    --line: #dcdfe4;
     color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-    :root {
-        --paper: #1d1f23;
-        --ink: #f1f2f4;
-        --muted: #9aa1ac;
-        --line: #34373e;
-        --raised: #26282d;
-        --button: #f1f2f4;
-        --button-ink: #14161a;
-    }
+    :root { --paper: #18191b; --ink: #f2f3f4; --muted: #9a9fa8; --line: #3a3d43; }
 }
-
 * { box-sizing: border-box; }
-html { background: var(--paper); }
 body {
+    min-height: 100svh;
     margin: 0;
+    padding: 32px 24px;
+    display: grid;
+    place-items: center;
+    background: var(--paper);
     color: var(--ink);
-    font: 17px/1.5 var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif;
     -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-}
-a { color: inherit; text-underline-offset: 3px; }
-:focus-visible { outline: 3px solid color-mix(in srgb, var(--ink) 55%, transparent); outline-offset: 3px; border-radius: 6px; }
-
-/* The island: the app's own surface, hanging from the top edge of the screen. */
-.island {
-    position: absolute;
-    top: -24px;
-    left: 50%;
-    width: min(400px, calc(100vw - 56px));
-    height: 82px;
-    padding: 24px 18px 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #000;
-    border-radius: 0 0 22px 22px;
-    transform: translate(-50%, -100%);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.island.open {
-    transform: translate(-50%, 0);
-    transition: transform 0.55s cubic-bezier(0.3, 1.45, 0.5, 1);
-}
-.island::before, .island::after {
-    content: "";
-    position: absolute;
-    top: 24px;
-    width: 10px;
-    height: 10px;
-}
-.island::before { left: -10px; background: radial-gradient(circle at 0 100%, transparent 9.5px, #000 10px); }
-.island::after { right: -10px; background: radial-gradient(circle at 100% 100%, transparent 9.5px, #000 10px); }
-.dot {
-    flex: none;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--record);
-    transform: scale(var(--level, 1));
-    transition: transform 0.14s ease-out, background 0.25s ease-out;
-}
-.island.finishing .dot { background: var(--finish); }
-.caption {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    justify-content: flex-end;
-    overflow: hidden;
-    white-space: nowrap;
-    color: #fff;
-    font: 500 13px/1 var(--rounded);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 18%);
-    mask-image: linear-gradient(90deg, transparent, #000 18%);
-}
-.caption span { margin: 0 auto; }
-.caption .waiting { color: rgba(255, 255, 255, 0.45); }
-
-main {
-    max-width: 680px;
-    margin: 0 auto;
-    padding: 132px 24px 72px;
     text-align: center;
 }
-.brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font: 600 1.05rem/1 var(--rounded);
-    letter-spacing: -0.01em;
-}
-.brand img { width: 36px; height: 36px; }
-h1 {
-    margin: 28px 0 0;
-    font: 700 clamp(2.2rem, 7vw, 3.6rem)/1.07 var(--rounded);
-    letter-spacing: -0.025em;
-    text-wrap: balance;
-}
-.caret {
-    display: inline-block;
-    width: 0.07em;
-    height: 0.86em;
-    margin-left: 0.06em;
-    vertical-align: -0.08em;
-    background: var(--ink);
-    animation: blink 1.1s steps(1) infinite;
-}
-@keyframes blink { 50% { opacity: 0; } }
-.js.intro h1 .words { visibility: hidden; }
-.lede {
-    max-width: 34em;
-    margin: 20px auto 0;
-    color: var(--muted);
-    text-wrap: pretty;
-}
+main { width: 100%; max-width: 340px; }
+img { display: block; width: 88px; height: 88px; margin: 0 auto; }
+h1 { margin: 18px 0 0; font-size: 1.6rem; font-weight: 650; letter-spacing: -0.02em; }
+p { margin: 0; color: var(--muted); }
+.what { margin-top: 6px; text-wrap: balance; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 
-.get { margin-top: 40px; }
-.primary {
-    display: inline-block;
-    min-width: 280px;
-    padding: 17px 34px;
-    border-radius: 999px;
-    background: var(--button);
-    color: var(--button-ink);
-    font: 600 1.12rem/1.2 var(--rounded);
+.downloads { display: grid; gap: 10px; margin-top: 32px; }
+.downloads a, .downloads span {
+    display: block;
+    padding: 12px 20px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-weight: 550;
     text-decoration: none;
-    transition: transform 0.12s ease-out;
 }
-.primary:active { transform: scale(0.98); }
-.primary[aria-disabled="true"] { background: var(--line); color: var(--muted); pointer-events: none; }
-.needs { margin: 14px 0 0; color: var(--muted); font-size: 0.92rem; }
-.note {
-    max-width: 34em;
-    margin: 26px auto 0;
-    padding: 16px 18px;
-    border-radius: 14px;
-    background: var(--raised);
-    font-size: 0.92rem;
-    text-align: left;
-    text-wrap: pretty;
-}
-.note p { margin: 0; }
-.note p + p { margin-top: 10px; }
-.command {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 10px;
-    padding: 10px 10px 10px 14px;
-    border-radius: 10px;
-    background: var(--paper);
-}
-.command code {
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-    white-space: nowrap;
-    font: 0.8rem/1.4 var(--mono);
-    scrollbar-width: none;
-}
-.command button {
-    flex: none;
-    padding: 6px 12px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--button);
-    color: var(--button-ink);
-    font: 600 0.8rem/1 var(--text);
-    cursor: pointer;
-}
-
-.systems { margin-top: 56px; text-align: left; }
-.systems ul { margin: 0; padding: 0; list-style: none; }
-.systems h2 { margin: 0 0 6px; font: 600 0.92rem/1.3 var(--text); color: var(--muted); }
-.systems li {
-    display: grid;
-    grid-template-columns: 6.5em 1fr auto;
-    align-items: baseline;
-    gap: 4px 16px;
-    padding: 15px 0;
-    border-top: 1px solid var(--line);
-}
-.systems li:last-child { border-bottom: 1px solid var(--line); }
-.systems .name { font: 600 1rem/1.3 var(--rounded); }
-.systems .req { color: var(--muted); font-size: 0.92rem; }
-.systems .files { display: flex; gap: 16px; font-weight: 600; font-size: 0.95rem; }
-.systems .soon { color: var(--muted); font-weight: 400; }
-.systems .here .name::after {
-    content: "this computer";
-    margin-left: 8px;
-    padding: 2px 8px;
-    border-radius: 999px;
+.downloads a:hover { border-color: var(--ink); }
+.downloads .here {
+    order: -1;
+    padding: 16px 20px;
+    border-color: var(--ink);
     background: var(--ink);
     color: var(--paper);
-    font: 600 0.68rem/1.5 var(--text);
-    vertical-align: 2px;
-    white-space: nowrap;
+    font-size: 1.06rem;
 }
-
-footer {
-    margin-top: 48px;
-    color: var(--muted);
-    font-size: 0.88rem;
-}
-footer p { margin: 0; }
-footer p + p { margin-top: 6px; }
-
-@media (max-width: 560px) {
-    main { padding-top: 116px; }
-    .primary { min-width: 0; width: 100%; }
-    .systems li { grid-template-columns: 1fr auto; }
-    .systems .req { grid-column: 1 / -1; grid-row: 2; }
-    .systems .here .name::after { content: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-    .island, .island.open, .dot, .primary { transition: none; }
-    .caret { animation: none; }
-}
+.downloads span { color: var(--muted); font-weight: 400; }
+.small { margin-top: 20px; font-size: 0.86rem; }
 </style>
 </head>
 <body>
-<div class="island" aria-hidden="true">
-    <span class="dot"></span>
-    <div class="caption"><span class="waiting">Listening…</span></div>
-</div>
-
 <main>
-    <div class="brand"><img src="icon.png" alt="">Transcriptor</div>
-    <h1><span class="words">Press a key, speak, and the text lands at your cursor.</span><span class="caret" aria-hidden="true"></span></h1>
-    <p class="lede">Dictation for macOS, Windows and Linux. It works in every app, keeps your transcriptions on your computer, and runs on your own Soniox key for about $0.12 per hour of speech.</p>
+    <img src="data:image/png;base64,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" alt="">
+    <h1>Transcriptor</h1>
+    <p class="what">Press a key, speak, and the text lands at your cursor.</p>
 
-    <section class="get">
-        <a class="primary" id="primary" href="https://github.com/rrretsuf/transcriptor/releases/latest">Download Transcriptor</a>
-        <p class="needs" id="needs">Choose your system below.</p>
-        <div class="note" id="note" hidden></div>
-    </section>
+    <div class="downloads">
+        <a data-os="mac" data-file="Transcriptor.dmg" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg">macOS</a>
+        <a data-os="windows" data-file="Transcriptor-windows-x64-setup.exe" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-windows-x64-setup.exe">Windows</a>
+        <a data-os="linux" data-file="Transcriptor-linux-x86_64.AppImage" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-x86_64.AppImage">Linux AppImage</a>
+        <a data-os="linux-deb" data-file="Transcriptor-linux-amd64.deb" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-amd64.deb">Linux .deb</a>
+    </div>
 
-    <section class="systems">
-        <h2>All downloads</h2>
-        <ul>
-        <li data-os="mac">
-            <span class="name">macOS</span>
-            <span class="req">macOS 15 or later, Apple Silicon and Intel</span>
-            <span class="files"><a data-file="Transcriptor.dmg" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg">Disk image</a></span>
-        </li>
-        <li data-os="windows">
-            <span class="name">Windows</span>
-            <span class="req">Windows 10 or 11, 64-bit</span>
-            <span class="files"><a data-file="Transcriptor-windows-x64-setup.exe" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-windows-x64-setup.exe">Installer</a></span>
-        </li>
-        <li data-os="linux">
-            <span class="name">Linux</span>
-            <span class="req">64-bit, X11 or Wayland</span>
-            <span class="files"><a data-file="Transcriptor-linux-x86_64.AppImage" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-x86_64.AppImage">AppImage</a><a data-file="Transcriptor-linux-amd64.deb" href="https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-amd64.deb">.deb</a></span>
-        </li>
-        </ul>
-    </section>
-
-    <footer>
-        <p><span id="version"></span>You need a Soniox API key; the welcome window shows where to get one.</p>
-        <p><a href="https://github.com/rrretsuf/transcriptor">Source and install notes on GitHub</a></p>
-    </footer>
+    <p class="small"><span id="version"></span><a href="https://github.com/rrretsuf/transcriptor#install">Install help</a> and source on <a href="https://github.com/rrretsuf/transcriptor">GitHub</a></p>
 </main>
 
 <script>
-const systems = {
-    mac: {
-        label: 'Download for macOS',
-        file: 'Transcriptor.dmg',
-        note: `<p>macOS warns on the first start, because the app has no paid Apple certificate. Click <b>Done</b>, then open System Settings › Privacy &amp; Security and click <b>Open Anyway</b>.</p>
-<p>To skip the warning, install from Terminal:</p>
-<div class="command"><code>curl -fsSL https://raw.githubusercontent.com/rrretsuf/transcriptor/main/install.sh | bash</code><button type="button">Copy</button></div>`,
-    },
-    windows: {
-        label: 'Download for Windows',
-        file: 'Transcriptor-windows-x64-setup.exe',
-        note: `<p>If Windows says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>. The app has no paid Microsoft certificate.</p>`,
-    },
-    linux: {
-        label: 'Download for Linux',
-        file: 'Transcriptor-linux-x86_64.AppImage',
-        note: `<p>Make the AppImage executable, then run it:</p>
-<div class="command"><code>chmod +x Transcriptor-linux-x86_64.AppImage &amp;&amp; ./Transcriptor-linux-x86_64.AppImage</code><button type="button">Copy</button></div>
-<p>On Debian and Ubuntu you can install the .deb from the list below instead.</p>`,
-    },
-};
-
 // ?os=windows shows the page as another system sees it.
 function detect() {
     const asked = new URLSearchParams(location.search).get('os');
-    if (asked in systems) return asked;
+    if (asked) return asked;
     const platform = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
     const agent = navigator.userAgent.toLowerCase();
-    const phone = /android|iphone|ipad|ipod/.test(agent) || (platform.includes('mac') && navigator.maxTouchPoints > 1);
-    if (phone) return null;
+    if (/android|iphone|ipad|ipod/.test(agent) || (platform.includes('mac') && navigator.maxTouchPoints > 1)) return null;
     if (platform.includes('mac')) return 'mac';
     if (platform.includes('win')) return 'windows';
     if (platform.includes('linux') || /x11|cros/.test(agent)) return 'linux';
     return null;
 }
 
-const os = detect();
-const primary = document.getElementById('primary');
-const needs = document.getElementById('needs');
-const note = document.getElementById('note');
-
-if (os) {
-    const row = document.querySelector(`[data-os="${os}"]`);
-    row.classList.add('here');
-    primary.textContent = systems[os].label;
-    primary.href = row.querySelector(`[data-file="${systems[os].file}"]`).href;
-    needs.textContent = row.querySelector('.req').textContent;
-    note.innerHTML = systems[os].note;
-    note.hidden = false;
-} else {
-    needs.textContent = 'Transcriptor is a desktop app. Open this page on your computer, or choose a system below.';
+const here = document.querySelector(`[data-os="${detect()}"]`);
+if (here) {
+    here.classList.add('here');
+    here.textContent = `Download for ${here.textContent}`;
 }
-
-note.addEventListener('click', event => {
-    if (event.target.tagName !== 'BUTTON') return;
-    navigator.clipboard.writeText(event.target.previousElementSibling.textContent).then(() => {
-        event.target.textContent = 'Copied';
-        setTimeout(() => { event.target.textContent = 'Copy'; }, 1400);
-    });
-});
 
 // The latest release decides what can be downloaded today; without an answer the links stay as they are.
 fetch('https://api.github.com/repos/rrretsuf/transcriptor/releases/latest')
     .then(response => response.ok ? response.json() : Promise.reject())
     .then(release => {
-        const assets = new Map(release.assets.map(asset => [asset.name, asset]));
+        const files = new Set(release.assets.map(asset => asset.name));
         document.getElementById('version').textContent = `Version ${release.tag_name.replace(/^v/, '')}. `;
         for (const link of document.querySelectorAll('[data-file]')) {
-            const asset = assets.get(link.dataset.file);
-            if (asset) {
-                link.href = asset.browser_download_url;
-                link.title = `${(asset.size / 1048576).toFixed(1)} MB`;
-            } else {
-                const soon = document.createElement('span');
-                soon.className = 'soon';
-                soon.textContent = link.parentElement.querySelector('.soon') ? '' : 'coming soon';
-                link.replaceWith(soon);
-            }
-        }
-        if (!os) return;
-        const asset = assets.get(systems[os].file);
-        if (asset) {
-            primary.href = asset.browser_download_url;
-        } else {
-            primary.textContent = `${systems[os].label.replace('Download for ', '')} is coming soon`;
-            primary.setAttribute('aria-disabled', 'true');
-            primary.removeAttribute('href');
-            note.hidden = true;
+            if (files.has(link.dataset.file)) continue;
+            const soon = document.createElement('span');
+            soon.className = link.className;
+            soon.textContent = `${link.textContent.replace('Download for ', '')} is coming soon`;
+            link.replaceWith(soon);
         }
     })
     .catch(() => {});
-
-// One dictation on load: the island opens, hears the headline, and the headline lands at the caret.
-const root = document.documentElement;
-if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    root.classList.add('intro');
-    const island = document.querySelector('.island');
-    const caption = island.querySelector('.caption span');
-    const dot = island.querySelector('.dot');
-    const words = document.querySelector('h1 .words').textContent.split(' ');
-    const wait = ms => new Promise(done => setTimeout(done, ms));
-    (async () => {
-        await wait(350);
-        island.classList.add('open');
-        await wait(750);
-        caption.className = '';
-        caption.textContent = '';
-        for (const word of words) {
-            caption.textContent += (caption.textContent ? ' ' : '') + word;
-            dot.style.setProperty('--level', (1.15 + Math.random() * 0.7).toFixed(2));
-            await wait(95 + word.length * 16);
-        }
-        dot.style.setProperty('--level', 1);
-        island.classList.add('finishing');
-        await wait(520);
-        island.classList.remove('open');
-        root.classList.remove('intro');
-    })();
-}
 </script>
 </body>
 </html>
