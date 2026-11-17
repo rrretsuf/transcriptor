@@ -90,6 +90,14 @@ mod tests {
     }
 
     #[test]
+    fn times_written_by_the_mac_app_survive_to_the_last_digit() {
+        let entry: Entry = serde_json::from_str(r#"{"text":"hi","at":1794943465812.0667,"startedAt":1763385600123.4568}"#).unwrap();
+        let written = serde_json::to_string(&entry).unwrap();
+        assert!(written.contains("1794943465812.0667") && written.contains("1763385600123.4568"), "{written}");
+        assert_eq!(serde_json::from_str::<Entry>(&written).unwrap(), entry);
+    }
+
+    #[test]
     fn empty_optionals_are_not_written() {
         let entry: Entry = serde_json::from_str(r#"{"text":"hi","at":1}"#).unwrap();
         let value = serde_json::to_value(&entry).unwrap();

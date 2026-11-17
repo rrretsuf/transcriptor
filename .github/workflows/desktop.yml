@@ -27,8 +27,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Windows x64, os: windows-latest }
-          - { name: Linux x64, os: ubuntu-22.04 }
+          - { name: Windows x64, id: windows-x64, os: windows-latest }
+          - { name: Linux x64, id: linux-x64, os: ubuntu-22.04 }
+          - { name: Linux arm64, id: linux-arm64, os: ubuntu-22.04-arm }
     defaults:
       run:
         shell: bash
@@ -79,7 +80,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: screens-${{ runner.os }}
+          name: screens-${{ matrix.id }}
           path: screens/*
           if-no-files-found: warn
 
@@ -90,14 +91,23 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             cp $bundle/nsis/*-setup.exe installers/Transcriptor-windows-x64-setup.exe
           else
-            cp $bundle/appimage/*.AppImage installers/Transcriptor-linux-x86_64.AppImage
-            cp $bundle/deb/*.deb installers/Transcriptor-linux-amd64.deb
+            cp $bundle/appimage/*.AppImage installers/Transcriptor-linux-$(uname -m).AppImage
+            cp $bundle/deb/*.deb installers/Transcriptor-linux-$(dpkg --print-architecture).deb
           fi
           ls -l installers
 
+      - name: Test the installers (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- desktop/ci/installed-linux.sh installers
+
+      - name: Test the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: desktop/ci/installed-windows.ps1 installers/Transcriptor-windows-x64-setup.exe
+
       - uses: actions/upload-artifact@v4
         with:
-          name: transcriptor-${{ runner.os }}
+          name: transcriptor-${{ matrix.id }}
           path: installers/*
           if-no-files-found: error
 

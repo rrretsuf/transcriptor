@@ -42,7 +42,7 @@ async fn snapshot(app: AppState<'_>) -> Result<Value, String> {
         "hotkeyLabel": app.hotkey_label(),
         "hotkeyProblem": *app.hotkey_problem.lock().unwrap(),
         "desktopOwnsHotkey": app.portal_hotkey.lock().unwrap().is_some(),
-        "toggleCommand": format!("{} --toggle", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or("transcriptor".into())),
+        "toggleCommand": format!("{} --toggle", program()),
         "view": *app.view.lock().unwrap(),
         "hasKey": has_key,
         "unreadable": app.unreadable,
@@ -228,6 +228,15 @@ fn bind_desktop_hotkey(app: &Arc<App>) {
         shell::state_changed(&app);
         let _ = app.handle.emit("hotkey", ());
     });
+}
+
+/// The path a desktop shortcut can run. An AppImage runs from a mount that
+/// moves on every launch; its own file is what stays.
+fn program() -> String {
+    std::env::var("APPIMAGE")
+        .ok()
+        .or_else(|| std::env::current_exe().ok().map(|path| path.display().to_string()))
+        .unwrap_or("transcriptor".into())
 }
 
 /// `--show settings` opens the window on that view.
