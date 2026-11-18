@@ -47,12 +47,12 @@ private func languageName(_ code: String) -> String {
 // MARK: - Settings
 
 struct SettingsView: View {
-    let state: AppState
+    @ObservedObject var state: AppState
 
     var body: some View {
         TabView {
-            Tab("General", systemImage: "gearshape") { general }
-            Tab("Dictation", systemImage: "waveform") { dictation }
+            general.tabItem { Label("General", systemImage: "gearshape") }
+            dictation.tabItem { Label("Dictation", systemImage: "waveform") }
         }
         .frame(width: 540, height: 600)
         .onDisappear { state.store.flushConfig() }
@@ -129,7 +129,7 @@ struct SettingsView: View {
 /// Click, press the combination, done. Escape cancels; modifier double-taps live in the menu.
 private struct HotkeyRecorder: View {
     @Binding var hotkey: String
-    @State private var capture = KeyCapture()
+    @StateObject private var capture = KeyCapture()
 
     var body: some View {
         LabeledContent("Dictation Hotkey") {
@@ -193,7 +193,7 @@ private struct KeyField: View {
 }
 
 private struct LanguagesRow: View {
-    let state: AppState
+    @ObservedObject var state: AppState
 
     var body: some View {
         LabeledContent("Languages") {
@@ -236,7 +236,7 @@ private struct LanguagesRow: View {
 
 /// Everything the local history can tell.
 private struct UsageGrid: View {
-    let state: AppState
+    @ObservedObject var state: AppState
 
     var body: some View {
         let history = state.store.history
@@ -283,7 +283,7 @@ private struct StatTile: View {
 // MARK: - History
 
 struct HistoryView: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     @State private var query = ""
     @State private var meetingsOnly = false
 
@@ -292,15 +292,17 @@ struct HistoryView: View {
         NavigationStack {
             Group {
                 if meetingsOnly && !state.store.history.contains(where: \.isMeeting) {
-                    ContentUnavailableView("No Meetings",
-                                           systemImage: "record.circle",
-                                           description: Text("Start one from the menu bar: Start Meeting Transcription."))
+                    EmptyState("No Meetings",
+                               systemImage: "record.circle",
+                               description: "Start one from the menu bar: Start Meeting Transcription.")
                 } else if state.store.history.isEmpty {
-                    ContentUnavailableView("No Transcriptions",
-                                           systemImage: "waveform",
-                                           description: Text("Press \(Hotkeys.display(state.config.hotkey)) and start talking."))
+                    EmptyState("No Transcriptions",
+                               systemImage: "waveform",
+                               description: "Press \(Hotkeys.display(state.config.hotkey)) and start talking.")
                 } else if filtered.isEmpty {
-                    ContentUnavailableView.search(text: query)
+                    EmptyState("No Results for “\(query)”",
+                               systemImage: "magnifyingglass",
+                               description: "Check the spelling or try a new search.")
                 } else {
                     List(filtered, id: \.id) { entry in
                         HistoryRow(entry: entry) { delete(entry) }

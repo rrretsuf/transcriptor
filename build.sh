@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# One binary for Apple Silicon and Intel, running on macOS 15 and later. SwiftPM
+# One binary for Apple Silicon and Intel, running on macOS 13 and later. SwiftPM
 # stamps the binary with the minimum version as its SDK version, and macOS then
 # draws the app in the old design; stamping the real SDK keeps Liquid Glass on 26+.
 MIN="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Resources/Info.plist)"

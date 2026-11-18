@@ -33,13 +33,11 @@ struct TranscriptorApp: App {
             FileView(files: delegate.appState.files)
         }
         .defaultSize(width: 520, height: 460)
-        .restorationBehavior(.disabled)
 
         Window("Meeting", id: "meeting") {
             MeetingView(meeting: delegate.appState.meeting)
         }
         .defaultSize(width: 520, height: 560)
-        .restorationBehavior(.disabled)
 
         Window("Welcome to Transcriptor", id: "onboarding") {
             OnboardingView(state: delegate.appState)
@@ -47,25 +45,20 @@ struct TranscriptorApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
         .defaultPosition(.center)
-        .defaultLaunchBehavior(.suppressed)
-        .restorationBehavior(.disabled)
     }
 
 }
 
 // The tray label is the one view alive from launch, so it lends AppState the
-// scene's openSettings action (the private showSettingsWindow: selector is dead).
+// scene's window actions.
 private struct TrayLabel: View {
-    let state: AppState
-    @Environment(\.openSettings) private var openSettings
+    @ObservedObject var state: AppState
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Image(nsImage: Self.trayImage(active: state.state != .idle || state.meeting.status == .recording))
-            .onAppear {
-                state.openSettings = { openSettings() }
-                state.openWindow = { openWindow(id: $0) }
-            }
+            .background { if #available(macOS 14, *) { SettingsLender(state: state) } }
+            .onAppear { state.openWindow = { openWindow(id: $0) } }
     }
 
     // Drawn as a vector so it stays crisp at any scale: five rounded bars, nothing else.
@@ -91,7 +84,7 @@ private struct TrayLabel: View {
 }
 
 private struct MenuContent: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -134,11 +127,24 @@ private struct MenuContent: View {
     }
 }
 
+// macOS 14 killed the showSettingsWindow: selector that macOS 13 still answers.
+@available(macOS 14, *)
+private struct SettingsLender: View {
+    let state: AppState
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Color.clear.onAppear { state.openSettings = { openSettings() } }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A menu bar app reopens nothing: no window comes back after a relaunch.
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
         let bundleID = Bundle.main.bundleIdentifier ?? ""
         if NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
             NSApp.terminate(nil)

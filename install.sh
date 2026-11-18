@@ -10,8 +10,8 @@ if [ "$(uname)" != Darwin ]; then
     echo "This installer is for macOS. Windows and Linux downloads: $RELEASES"
     exit 1
 fi
-if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 15 ]; then
-    echo "Transcriptor needs macOS 15 or later. This Mac runs macOS $(sw_vers -productVersion)."
+if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 13 ]; then
+    echo "Transcriptor needs macOS 13 or later. This Mac runs macOS $(sw_vers -productVersion)."
     exit 1
 fi
 

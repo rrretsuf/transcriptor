@@ -149,10 +149,10 @@ final class Hotkeys {
 
 /// Records one key press for a hotkey field: click, press the combination, done.
 /// Escape cancels; a bare key is ignored because it would swallow typing.
-@MainActor @Observable
-final class KeyCapture {
-    private(set) var recording = false
-    @ObservationIgnored private var monitor: Any?
+@MainActor
+final class KeyCapture: ObservableObject {
+    @Published private(set) var recording = false
+    private var monitor: Any?
 
     func start(_ onKey: @escaping (String) -> Void) {
         stop()

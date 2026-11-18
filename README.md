@@ -22,7 +22,7 @@ For macOS, Windows and Linux. Native Swift on the Mac, Rust elsewhere; no Electr
 
 | System | Download | Needs |
 | --- | --- | --- |
-| macOS | [Transcriptor.dmg](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg) | macOS 15 or later, Apple Silicon or Intel |
+| macOS | [Transcriptor.dmg](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor.dmg) | macOS 13 or later, Apple Silicon or Intel |
 | Windows | [Transcriptor-windows-x64-setup.exe](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-windows-x64-setup.exe) | Windows 10 or 11, 64-bit |
 | Linux | [AppImage](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-x86_64.AppImage) · [.deb](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-amd64.deb) (arm64: [AppImage](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-aarch64.AppImage) · [.deb](https://github.com/rrretsuf/transcriptor/releases/latest/download/Transcriptor-linux-arm64.deb)) | 64-bit, X11 or Wayland |
 
@@ -73,7 +73,7 @@ fresh install finds them on its own.
 | --- | --- |
 | Microphone | Hears you while you dictate. |
 | Accessibility | Types the text where your cursor is. Without it the text is copied and you paste it yourself. |
-| System Audio Recording | Hears the other side of a call in a meeting. Without it a meeting uses the microphone only. |
+| System Audio Recording | Hears the other side of a call in a meeting. Without it a meeting uses the microphone only. On macOS 13 and 14.0–14.1 this is **Screen Recording**: those systems capture call audio only through it. Nothing on the screen is recorded. |
 
 ### Build from source (macOS)
 
@@ -140,7 +140,8 @@ The menu bar icon animates while recording; its menu holds
   side of a Meet or Zoom call), with or without headphones. Each change of voice
   starts a "Speaker N:" paragraph. Pause, continue, end; the full transcript is
   ready to copy. The first meeting asks for the
-  **System Audio Recording** permission; without it the meeting uses the microphone only.
+  **System Audio Recording** permission (**Screen Recording** before macOS 14.2);
+  without it the meeting uses the microphone only.
 
 Both save their transcripts to **All Transcriptions**. Meetings and files are kept
 for good; the oldest dictations fall off after 5,000.

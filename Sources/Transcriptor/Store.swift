@@ -1,13 +1,14 @@
+import Combine
 import Foundation
 
-@MainActor @Observable
-final class Store {
+@MainActor
+final class Store: ObservableObject {
     let directory: URL
-    private(set) var config = Config.defaults
-    private(set) var history: [HistoryEntry] = []
-    private(set) var configReadable = true
-    private(set) var historyReadable = true
-    var lastTranscript = ""
+    @Published private(set) var config = Config.defaults
+    @Published private(set) var history: [HistoryEntry] = []
+    @Published private(set) var configReadable = true
+    @Published private(set) var historyReadable = true
+    @Published var lastTranscript = ""
     private var persistTask: Task<Void, Never>?
 
     /// TRANSCRIPTOR_DATA_DIR points a test run away from the real transcriptions.

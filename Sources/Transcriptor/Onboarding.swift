@@ -5,8 +5,7 @@ import SwiftUI
 // window closes and the app retreats to the menu bar.
 
 struct OnboardingView: View {
-    let state: AppState
-    @Environment(\.dismissWindow) private var dismissWindow
+    @ObservedObject var state: AppState
     @State private var step = Step.key
 
     private enum Step: Int, CaseIterable { case key, hotkey, permissions, trial }
@@ -15,10 +14,10 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             ZStack {
                 switch step {
-                case .key: KeyPage(state: state, next: next).transition(.blurReplace)
-                case .hotkey: HotkeyPage(state: state, next: next).transition(.blurReplace)
-                case .permissions: PermissionsPage(state: state, next: next).transition(.blurReplace)
-                case .trial: TrialPage(state: state, next: finish).transition(.blurReplace)
+                case .key: KeyPage(state: state, next: next).transition(.blurOrFade)
+                case .hotkey: HotkeyPage(state: state, next: next).transition(.blurOrFade)
+                case .permissions: PermissionsPage(state: state, next: next).transition(.blurOrFade)
+                case .trial: TrialPage(state: state, next: finish).transition(.blurOrFade)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,7 +54,7 @@ struct OnboardingView: View {
 
     private func finish() {
         state.finishOnboarding()
-        dismissWindow(id: "onboarding")
+        NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("onboarding") == true }?.close()
     }
 }
 
@@ -112,8 +111,7 @@ private struct PrimaryButton: View {
             Text(title).fontWeight(.semibold).frame(maxWidth: .infinity)
         }
         .glassButton(prominent: prominent)
-        .buttonBorderShape(.capsule)
-        .controlSize(.extraLarge)
+        .pill()
         .keyboardShortcut(.defaultAction)
         .disabled(disabled)
     }
@@ -124,7 +122,7 @@ private let field = RoundedRectangle(cornerRadius: 12, style: .continuous)
 // MARK: - Key
 
 private struct KeyPage: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     let next: () -> Void
     @State private var key = ""
     @State private var saved = false
@@ -172,7 +170,7 @@ private struct KeyPage: View {
             saved = !(Keychain.get(Keychain.Account.soniox) ?? "").isEmpty
             focused = true
         }
-        .onChange(of: key) { problem = nil }
+        .changed(key) { _ in problem = nil }
     }
 
     private func submit() {
@@ -201,9 +199,9 @@ private struct KeyPage: View {
 // MARK: - Hotkey
 
 private struct HotkeyPage: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     let next: () -> Void
-    @State private var capture = KeyCapture()
+    @StateObject private var capture = KeyCapture()
     @State private var taken = false
     @State private var hovering = false
 
@@ -264,7 +262,7 @@ private struct HotkeyPage: View {
         }
         // The hotkey stays unregistered while a new one is recorded, so pressing
         // the current combination records it instead of starting a dictation.
-        .onChange(of: capture.recording) { _, recording in
+        .changed(capture.recording) { recording in
             if !recording { taken = !state.registerHotkey() }
         }
         .onDisappear(perform: capture.stop)
@@ -287,7 +285,7 @@ private struct HotkeyPage: View {
 // MARK: - Permissions
 
 private struct PermissionsPage: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     let next: () -> Void
 
     var body: some View {
@@ -305,14 +303,14 @@ private struct PermissionsPage: View {
                     Row(permission: .accessibility, granted: accessibility, icon: "character.cursor.ibeam",
                         title: "Accessibility", detail: "Types the text where your cursor is.")
                     Row(permission: .systemAudio, granted: Permission.systemAudio.granted, icon: "speaker.wave.2.fill",
-                        title: "System Audio", detail: "Hears the other side in meetings.")
+                        title: Permission.systemAudioName, detail: "Hears the other side in meetings.")
                 }
             } action: {
                 PrimaryButton(title: accessibility || !microphone ? "Continue" : "Continue without typing",
                               disabled: !microphone, action: next)
             }
             // Double-tap hotkeys listen through an event tap that only opens once trusted.
-            .onChange(of: accessibility) { state.registerHotkey() }
+            .changed(accessibility) { _ in state.registerHotkey() }
         }
     }
 
@@ -356,7 +354,7 @@ private struct PermissionsPage: View {
 // MARK: - Trial
 
 private struct TrialPage: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     let next: () -> Void
     @State private var text = ""
     @State private var worked = false
@@ -367,14 +365,14 @@ private struct TrialPage: View {
         Page(title: "Try it",
              subtitle: "Press \(hotkey), say a sentence, then press \(hotkey) again.") {
             Symbol(name: worked ? "checkmark" : "waveform")
-                .contentTransition(.symbolEffect(.replace))
+                .replacesSymbol()
         } content: {
             VStack(spacing: 12) {
                 TextEditor(text: $text)
                     .font(.title3)
                     .scrollContentBackground(.hidden)
                     .focused($focused)
-                    .writingToolsBehavior(.disabled)
+                    .noWritingTools()
                     .padding(10)
                     .frame(height: 132)
                     .background(.quaternary.opacity(0.6), in: field)
@@ -389,7 +387,7 @@ private struct TrialPage: View {
             PrimaryButton(title: worked ? "Start using Transcriptor" : "Skip", prominent: worked, action: next)
         }
         .onAppear { focused = true }
-        .onChange(of: state.store.lastTranscript) { _, transcript in
+        .changed(state.store.lastTranscript) { transcript in
             worked = true
             // Without Accessibility nothing is typed; show the words anyway.
             Task {

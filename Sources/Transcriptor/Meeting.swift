@@ -1,23 +1,24 @@
+import Combine
 import Foundation
 
 // A live meeting: the microphone plus everything the Mac plays, transcribed
 // until End. Each stretch between Pause and Continue is its own Soniox session,
 // so a pause sends no audio at all and the socket never idles out. The
 // finished transcript lands in history under its name, with start and end time.
-@MainActor @Observable
-final class Meeting {
+@MainActor
+final class Meeting: ObservableObject {
     enum Status { case idle, recording, paused, finishing, done }
 
-    private(set) var status = Status.idle
-    var title = ""
-    private(set) var startedAt: Date?
-    private(set) var endedAt: Date?
+    @Published private(set) var status = Status.idle
+    @Published var title = ""
+    @Published private(set) var startedAt: Date?
+    @Published private(set) var endedAt: Date?
     private var savedID: String?
-    private(set) var problem: String?
-    private(set) var text = ""          // closed segments
-    private(set) var live = ""          // the open segment, partial words included
-    private var elapsedBefore = 0.0     // seconds recorded in closed segments
-    private(set) var segmentStart: Date?
+    @Published private(set) var problem: String?
+    @Published private(set) var text = ""          // closed segments
+    @Published private(set) var live = ""          // the open segment, partial words included
+    @Published private var elapsedBefore = 0.0     // seconds recorded in closed segments
+    @Published private(set) var segmentStart: Date?
 
     private let store: Store
     private var session: Session?

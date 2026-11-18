@@ -9,15 +9,14 @@ import SwiftUI
 // so the screen behind stays visible.
 @MainActor
 final class NotchSurface {
-    @Observable
-    final class Model {
-        var phase: Phase = .idle
-        var tail = ""
-        var message = ""
-        var level: Double = 0
-        var open = false
-        var minimized = false
-        var notch = CGSize(width: 180, height: 32)
+    final class Model: ObservableObject {
+        @Published var phase: Phase = .idle
+        @Published var tail = ""
+        @Published var message = ""
+        @Published var level: Double = 0
+        @Published var open = false
+        @Published var minimized = false
+        @Published var notch = CGSize(width: 180, height: 32)
 
         /// Messages still unfold the island: they are the one thing worth reading.
         var compact: Bool { minimized && message.isEmpty }
@@ -187,7 +186,7 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
 // re-renders the caption, a level tick re-renders the dot, and the island
 // shape is left alone.
 private struct NotchContent: View {
-    var model: NotchSurface.Model
+    @ObservedObject var model: NotchSurface.Model
     let surface: NotchSurface
     @Namespace private var namespace
 
@@ -252,7 +251,7 @@ private struct MinimizeButton: View {
 }
 
 private struct Caption: View {
-    var model: NotchSurface.Model
+    @ObservedObject var model: NotchSurface.Model
 
     var body: some View {
         Group {
@@ -292,7 +291,7 @@ private struct Caption: View {
 
 // Solid while recording, breathing with the voice level; dim otherwise.
 private struct Dot: View {
-    var model: NotchSurface.Model
+    @ObservedObject var model: NotchSurface.Model
 
     var body: some View {
         Circle()

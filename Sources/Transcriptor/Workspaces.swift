@@ -8,7 +8,7 @@ private let stateChange = Animation.spring(response: 0.45, dampingFraction: 0.86
 // MARK: - File
 
 struct FileView: View {
-    let files: FileTranscription
+    @ObservedObject var files: FileTranscription
     @State private var targeted = false
     @State private var choosing = false
 
@@ -16,22 +16,18 @@ struct FileView: View {
         ZStack {
             switch files.status {
             case .idle:
-                dropZone.transition(.blurReplace)
+                dropZone.transition(.blurOrFade)
             case .working(let stage):
                 Working(title: files.fileName, detail: label(stage)) { files.reset() }
-                    .transition(.blurReplace)
+                    .transition(.blurOrFade)
             case .done(let text):
                 TranscriptPanel(text: text, again: ("New File", files.reset))
-                    .transition(.blurReplace)
+                    .transition(.blurOrFade)
             case .failed(let message):
-                ContentUnavailableView {
-                    Label("Could not transcribe", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(message)
-                } actions: {
+                EmptyState(title: "Could not transcribe", systemImage: "exclamationmark.triangle", description: message) {
                     Button("Try Another File", action: files.reset).glassButton()
                 }
-                .transition(.blurReplace)
+                .transition(.blurOrFade)
             }
         }
         .padding(20)
@@ -47,7 +43,7 @@ struct FileView: View {
             Image(systemName: "waveform.badge.plus")
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(targeted ? Color.accentColor : .secondary)
-                .symbolEffect(.bounce, value: targeted)
+                .bounce(on: targeted)
             VStack(spacing: 4) {
                 Text("Drop audio or video").font(.title3.weight(.semibold))
                 Text("or click to choose a file").foregroundStyle(.secondary)
@@ -124,7 +120,7 @@ private struct WaveBars: View {
 // MARK: - Meeting
 
 struct MeetingView: View {
-    let meeting: Meeting
+    @ObservedObject var meeting: Meeting
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -154,7 +150,7 @@ struct MeetingView: View {
                     .controlSize(.large)
             }
             .frame(maxWidth: 320)
-            .transition(.blurReplace)
+            .transition(.blurOrFade)
         case .done:
             VStack(alignment: .leading, spacing: 12) {
                 if let start = meeting.startedAt, let end = meeting.endedAt {
@@ -165,9 +161,9 @@ struct MeetingView: View {
                     meeting.start()
                 }))
             }
-            .transition(.blurReplace)
+            .transition(.blurOrFade)
         case .recording, .paused, .finishing:
-            live.transition(.blurReplace)
+            live.transition(.blurOrFade)
         }
     }
 
@@ -194,8 +190,7 @@ struct MeetingView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
             }
-            .defaultScrollAnchor(.bottom, for: .initialOffset)
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .followsBottom()
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             if let problem = meeting.problem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
@@ -206,7 +201,7 @@ struct MeetingView: View {
             HStack(spacing: 12) {
                 Button(action: meeting.togglePause) {
                     Label(paused ? "Continue" : "Pause", systemImage: paused ? "play.fill" : "pause.fill")
-                        .contentTransition(.symbolEffect(.replace))
+                        .replacesSymbol()
                         .frame(minWidth: 96)
                 }
                 .glassButton()
@@ -243,7 +238,7 @@ struct MeetingView: View {
 
 /// Named at the start, renamable the whole time — even after the meeting ends.
 private struct TitleField: View {
-    @Bindable var meeting: Meeting
+    @ObservedObject var meeting: Meeting
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -258,7 +253,7 @@ private struct TitleField: View {
                 .opacity(focused ? 0 : 1)
                 .animation(.easeOut(duration: 0.15), value: focused)
         }
-        .onChange(of: focused) { if !focused { meeting.commitTitle() } }
+        .changed(focused) { if !$0 { meeting.commitTitle() } }
         .onDisappear { meeting.commitTitle() }
     }
 }
@@ -274,9 +269,18 @@ private struct RecordingDot: View {
     let active: Bool
 
     var body: some View {
+        if #available(macOS 14, *) { animated } else { dot }
+    }
+
+    private var dot: some View {
         Circle()
             .fill(active ? Color.red : .secondary)
             .frame(width: 10, height: 10)
+    }
+
+    @available(macOS 14, *)
+    private var animated: some View {
+        dot
             .background {
                 if active {
                     Circle()
@@ -340,7 +344,7 @@ private struct CopyButton: View {
             }
         } label: {
             Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
-                .contentTransition(.symbolEffect(.replace))
+                .replacesSymbol()
                 .frame(minWidth: 72)
         }
         .glassButton(prominent: true)

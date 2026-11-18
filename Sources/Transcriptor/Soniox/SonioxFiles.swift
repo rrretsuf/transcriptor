@@ -159,8 +159,8 @@ enum SonioxFiles {
 }
 
 /// One file at a time, from drop to transcript; the result also lands in history.
-@MainActor @Observable
-final class FileTranscription {
+@MainActor
+final class FileTranscription: ObservableObject {
     enum Status: Equatable {
         case idle
         case working(SonioxFiles.Stage)
@@ -168,8 +168,8 @@ final class FileTranscription {
         case failed(String)
     }
 
-    private(set) var status = Status.idle
-    private(set) var fileName = ""
+    @Published private(set) var status = Status.idle
+    @Published private(set) var fileName = ""
     private let store: Store
     private var task: Task<Void, Never>?
 

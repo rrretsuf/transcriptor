@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import AVFoundation
 import Foundation
 import ServiceManagement
@@ -7,11 +8,11 @@ import ServiceManagement
 // the AppState actor isolation.
 enum Phase { case idle, recording, finishing }
 
-@MainActor @Observable
-final class AppState {
+@MainActor
+final class AppState: ObservableObject {
     static let cancelHotkey = "Option+X"
 
-    private(set) var state = Phase.idle
+    @Published private(set) var state = Phase.idle
 
     let store = Store()
     let hotkeys = Hotkeys()
@@ -27,9 +28,14 @@ final class AppState {
 
     var config: Config { store.config }
 
+    private var forwards: [AnyCancellable] = []
+
     init() {
         files = FileTranscription(store: store)
         meeting = Meeting(store: store)
+        // Views read settings, history and the meeting's status through AppState.
+        forwards = [store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() },
+                    meeting.$status.sink { [weak self] _ in self?.objectWillChange.send() }]
     }
 
     func forgetKey() { apiKey = nil }
@@ -40,7 +46,7 @@ final class AppState {
 
     func showSettings() {
         NSApp.activate(ignoringOtherApps: true)
-        openSettings?()
+        if let openSettings { openSettings() } else { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
     }
 
     func showOnboarding() {

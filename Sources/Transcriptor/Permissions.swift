@@ -11,12 +11,17 @@ enum Permission: CaseIterable {
     case microphone, accessibility, systemAudio
 
     private static var accessibilityAsked = false
+    private static var screenAsked = false
+    /// Before macOS 14.2 meetings hear the Mac through ScreenCaptureKit, behind Screen Recording.
+    private static let usesScreenRecording = { if #available(macOS 14.2, *) { false } else { true } }()
+    static var systemAudioName: String { usesScreenRecording ? "Screen Recording" : "System Audio" }
 
     var granted: Bool {
         switch self {
         case .microphone: AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .accessibility: AXIsProcessTrusted()
-        case .systemAudio: TCC.preflight?(TCC.audioCapture, nil) == 0
+        case .systemAudio:
+            Self.usesScreenRecording ? CGPreflightScreenCaptureAccess() : TCC.preflight?(TCC.audioCapture, nil) == 0
         }
     }
 
@@ -38,6 +43,12 @@ enum Permission: CaseIterable {
             // which Swift 6 refuses to read as a global var.
             AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         case .systemAudio:
+            if Self.usesScreenRecording {
+                guard !Self.screenAsked else { return openSettings() }
+                Self.screenAsked = true
+                CGRequestScreenCaptureAccess()
+                return
+            }
             // Refused earlier: macOS will not ask again, only the pane can change it.
             guard let request = TCC.request, TCC.preflight?(TCC.audioCapture, nil) == 2 else { return openSettings() }
             await withCheckedContinuation { done in
@@ -52,7 +63,7 @@ enum Permission: CaseIterable {
         let pane = switch self {
         case .microphone: "Privacy_Microphone"
         case .accessibility: "Privacy_Accessibility"
-        case .systemAudio: "Privacy_AudioCapture"
+        case .systemAudio: Self.usesScreenRecording ? "Privacy_ScreenCapture" : "Privacy_AudioCapture"
         }
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!)
     }
