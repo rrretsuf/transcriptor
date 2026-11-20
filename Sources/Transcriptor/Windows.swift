@@ -64,7 +64,9 @@ struct SettingsView: View {
                 HotkeyRecorder(hotkey: binding(state, \.hotkey) { state.registerHotkeyOrNotify() })
                 LabeledContent("Cancel Recording", value: Hotkeys.display(AppState.cancelHotkey))
                 Toggle("Launch at Login", isOn: binding(state, \.launchAtLogin) { state.applyLaunchAtLogin() })
-                Toggle("Detect Meetings", isOn: binding(state, \.detectMeetings) { state.applyMeetingDetection() })
+                if #available(macOS 14.2, *) {
+                    Toggle("Detect Meetings", isOn: binding(state, \.detectMeetings) { state.applyMeetingDetection() })
+                }
             }
             Section {
                 KeyField(label: "Soniox", account: Keychain.Account.soniox) { state.forgetKey() }

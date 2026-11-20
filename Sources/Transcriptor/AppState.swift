@@ -57,9 +57,6 @@ final class AppState: ObservableObject {
     /// Lent by the tray label view; agent apps must activate before a window can come forward.
     var openSettings: (() -> Void)?
     var openWindow: ((String) -> Void)?
-    var statusItemFrame: (() -> NSRect?)? {
-        didSet { meetingBanner.anchorRect = statusItemFrame }
-    }
 
     private func wireMeetingDetection() {
         meetingDetector.isSuppressed = { [weak self] in
@@ -91,7 +88,8 @@ final class AppState: ObservableObject {
     }
 
     func applyMeetingDetection() {
-        if config.detectMeetings {
+        // Detection needs to know which app holds the microphone: macOS 14.2 and later.
+        if #available(macOS 14.2, *), config.detectMeetings {
             meetingBanner.install()
             meetingDetector.start()
         } else {
@@ -108,8 +106,9 @@ final class AppState: ObservableObject {
         meetingDetector.suppressNow()
         meetingBanner.hide()
         if !meeting.isActive {
-            meeting.reset()
-            meeting.start(title: detected.title)
+            if meeting.status == .done { meeting.reset() }
+            // A title typed before the call wins over the detected one.
+            meeting.start(title: meeting.title.isEmpty ? detected.title : nil)
         }
         NSApp.activate(ignoringOtherApps: true)
         openWindow?("meeting")

@@ -140,7 +140,7 @@ private struct TrayAnchor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
-        state.statusItemFrame = { [weak view] in
+        state.meetingBanner.anchorRect = { [weak view] in
             guard let view, let window = view.window else { return nil }
             let inWindow = view.convert(view.bounds, to: nil)
             return window.convertToScreen(inWindow)

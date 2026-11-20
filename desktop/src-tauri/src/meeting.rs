@@ -125,10 +125,9 @@ pub fn start_with_title(app: &Arc<App>, initial_title: Option<String>) {
         if meeting.is_active() {
             return;
         }
-        let title = initial_title
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| std::mem::take(&mut meeting.title));
+        // A title typed before the call wins over the detected one.
+        let typed = std::mem::take(&mut meeting.title);
+        let title = if typed.trim().is_empty() { initial_title.unwrap_or_default().trim().to_string() } else { typed };
         let last_id = meeting.last_id;
         *meeting = Meeting { title, last_id, started_at: Some(now_ms()), ..Meeting::default() };
     }

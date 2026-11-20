@@ -184,14 +184,7 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
     shell::hide_pill(&app.handle);
     report.check("pill window", visible, "shown and hidden");
 
-    let sample = crate::meeting_detect::DetectedMeeting {
-        id: "google-meet:selftest".into(),
-        source: "Google Meet".into(),
-        title: "Design Review".into(),
-        is_generic_title: false,
-        high_confidence: true,
-    };
-    shell::show_meeting_banner(&app.handle, &sample);
+    shell::show_meeting_banner(&app.handle, &sample_meeting());
     tokio::time::sleep(Duration::from_millis(400)).await;
     let banner_visible =
         tauri::Manager::get_webview_window(&app.handle, "meeting-banner").is_some_and(|w| w.is_visible().unwrap_or(false));
@@ -233,6 +226,7 @@ async fn end_to_end(app: &Arc<App>, report: &mut Report) {
         }
     }
     let _ = std::fs::write(app.dir.join("selftest-ready"), "ready");
+    meeting_banner_click(app, report).await;
 
     if key.is_some() {
         let spoken = async {
@@ -260,6 +254,48 @@ async fn end_to_end(app: &Arc<App>, report: &mut Report) {
     report.check("paste keys sent", outcome == paste::Outcome::Pasted, "Ctrl+V");
     tokio::time::sleep(Duration::from_millis(500)).await;
     shell::hide_pill(&app.handle);
+}
+
+fn sample_meeting() -> crate::meeting_detect::DetectedMeeting {
+    crate::meeting_detect::DetectedMeeting {
+        id: "google-meet:selftest".into(),
+        source: "Google Meet".into(),
+        title: "Design Review".into(),
+        is_generic_title: false,
+        high_confidence: true,
+    }
+}
+
+/// The test bench clicks Dismiss on the meeting banner at the screen point in
+/// `selftest-banner` while another app has the keyboard; the click must close
+/// the banner, and the bench checks that the other app kept the keyboard.
+async fn meeting_banner_click(app: &Arc<App>, report: &mut Report) {
+    let Some(banner) = tauri::Manager::get_webview_window(&app.handle, "meeting-banner") else {
+        return report.check("meeting banner click", false, "no banner window");
+    };
+    shell::show_meeting_banner(&app.handle, &sample_meeting());
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let (Ok(origin), Ok(scale)) = (banner.outer_position(), banner.scale_factor()) else {
+        return report.check("meeting banner click", false, "banner position unknown");
+    };
+    // The centre of Dismiss in meeting-banner.css: the pill is 356 x 48 and centred in the
+    // 420 x 96 window, 8 px from its top edge, or 10 px from its bottom edge on Windows.
+    let (x, y) = (364.0, if cfg!(target_os = "windows") { 62.0 } else { 32.0 });
+    let point = format!("{} {}", origin.x + (x * scale).round() as i32, origin.y + (y * scale).round() as i32);
+    let _ = std::fs::write(app.dir.join("selftest-banner"), &point);
+    let clicked = app.dir.join("selftest-banner-clicked");
+    for _ in 0..150 {
+        if clicked.exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let closed = !banner.is_visible().unwrap_or(true);
+    if !closed {
+        shell::hide_meeting_banner(&app.handle);
+    }
+    report.check("meeting banner click", clicked.exists() && closed, format!("Dismiss at {point} closes it"));
 }
 
 /// A meeting whose only sound is what the computer plays: the test bench plays

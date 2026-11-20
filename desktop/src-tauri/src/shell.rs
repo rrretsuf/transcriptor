@@ -105,6 +105,7 @@ pub fn create_windows(handle: &AppHandle) -> tauri::Result<()> {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
+        .focusable(false)
         .visible_on_all_workspaces(true)
         .visible(false);
     #[cfg(not(target_os = "macos"))]
@@ -169,17 +170,14 @@ pub fn show_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect:
     let mut edge = "top";
     if let Some(monitor) = handle.primary_monitor().ok().flatten() {
         let area = monitor.work_area();
-        let full_pos = monitor.position();
-        let full_size = monitor.size();
         let scale = monitor.scale_factor();
         let w = (BANNER_WIDTH * scale).round() as i32;
         let h = (BANNER_HEIGHT * scale).round() as i32;
         let inset = (4.0 * scale).round() as i32;
         let x = (area.position.x + area.size.width as i32 - w).max(area.position.x);
 
-        let taskbar_at_bottom = cfg!(target_os = "windows")
-            && (area.position.y + area.size.height as i32) <= (full_pos.y + full_size.height as i32);
-        let y = if taskbar_at_bottom {
+        // Next to the tray: above the taskbar on Windows, below the top bar on Linux.
+        let y = if cfg!(target_os = "windows") {
             edge = "bottom";
             area.position.y + area.size.height as i32 - h - inset
         } else {

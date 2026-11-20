@@ -252,27 +252,30 @@ struct MeetingDetectorTests {
         #expect(MeetingMatcher.detect(in: SystemSnapshot(apps: [chrome])) == nil)
     }
 
-    @Test func macOS13FallbackPrefersExplicitWebMeetingOverIdleNativeApp() {
-        let slack = AppSnapshot(
-            bundleID: "com.tinyspeck.slackmacgap",
-            name: "Slack",
-            windowTitles: ["Slack - #general"],
-            isFrontmost: false,
-            hasMic: false,
-            hasOutput: false
-        )
+    @Test func ignoresMeetingPlatformTitlesWithoutMicrophone() {
         let chrome = AppSnapshot(
             bundleID: "com.google.Chrome",
             name: "Google Chrome",
-            windowTitles: ["Meet – abc-defg-hij – Google Chrome"],
-            isFrontmost: false,
+            windowTitles: ["Chat | Ana Novak | Microsoft Teams - Google Chrome", "WhatsApp - Google Chrome"],
+            tabTitles: ["Lo-fi Beats - YouTube - Audio playing"],
             hasMic: false,
-            hasOutput: false
+            hasOutput: true
         )
-        let snapshot = SystemSnapshot(apps: [slack, chrome], globalMicActive: true, supportsPerProcessAudio: false)
-        let detected = MeetingMatcher.detect(in: snapshot)
-        #expect(detected?.source == "Google Meet")
-        #expect(detected?.title == "Google Meet")
+        let teams = AppSnapshot(bundleID: "com.microsoft.teams2", name: "Microsoft Teams",
+                                windowTitles: ["Chat | Microsoft Teams"], hasOutput: true)
+        #expect(MeetingMatcher.detect(in: SystemSnapshot(apps: [chrome, teams])) == nil)
+    }
+
+    @Test func findsMeetTabWhenAnotherTabIsInFront() {
+        let chrome = AppSnapshot(
+            bundleID: "com.google.Chrome",
+            name: "Google Chrome",
+            windowTitles: ["Q3 Plan - Google Docs - Google Chrome"],
+            tabTitles: ["Q3 Plan - Google Docs", "Meet – Weekly Sync - Camera or microphone recording"],
+            hasMic: true,
+            hasOutput: true
+        )
+        #expect(MeetingMatcher.detect(in: SystemSnapshot(apps: [chrome]))?.title == "Weekly Sync")
     }
 
     // MARK: - Tracker lifecycle & debounce
@@ -283,41 +286,55 @@ struct MeetingDetectorTests {
         let titled = DetectedMeeting(id: "google-meet:weekly sync", source: "Google Meet", title: "Weekly Sync", isGenericTitle: false, highConfidence: true)
 
         // High-confidence appears immediately on poll 1.
-        #expect(tracker.step(detected: generic, suppressed: false) == .show(generic))
+        #expect(tracker.step(detected: generic) == .show(generic))
         // Title arrives mid-call -> smooth update in-place.
-        #expect(tracker.step(detected: titled, suppressed: false) == .update(titled))
+        #expect(tracker.step(detected: titled) == .update(titled))
         // Brief 2-poll audio gap does not prematurely dismiss.
-        #expect(tracker.step(detected: nil, suppressed: false) == .none)
-        #expect(tracker.step(detected: nil, suppressed: false) == .none)
-        #expect(tracker.step(detected: titled, suppressed: false) == .none)
+        #expect(tracker.step(detected: nil) == .none)
+        #expect(tracker.step(detected: nil) == .none)
+        #expect(tracker.step(detected: titled) == .none)
 
         // User dismisses -> stays silent for the rest of this call.
         tracker.dismiss()
-        #expect(tracker.step(detected: titled, suppressed: false) == .none)
-        #expect(tracker.step(detected: generic, suppressed: false) == .none)
+        #expect(tracker.step(detected: titled) == .none)
+        #expect(tracker.step(detected: generic) == .none)
 
-        // 3 consecutive misses (~6s) mean the call genuinely ended -> resets for next call.
-        #expect(tracker.step(detected: nil, suppressed: false) == .none)
-        #expect(tracker.step(detected: nil, suppressed: false) == .none)
-        #expect(tracker.step(detected: nil, suppressed: false) == .none)
+        // A short gap keeps it closed; ~30 s without the call means it ended.
+        for _ in 0..<(MeetingTracker.forgetDismissAfterMisses - 1) { #expect(tracker.step(detected: nil) == .none) }
+        #expect(tracker.step(detected: titled) == .none)
+        for _ in 0..<MeetingTracker.forgetDismissAfterMisses { #expect(tracker.step(detected: nil) == .none) }
 
         // Next call pops up again.
-        #expect(tracker.step(detected: titled, suppressed: false) == .show(titled))
+        #expect(tracker.step(detected: titled) == .show(titled))
     }
 
     @Test func trackerRequiresTwoPollsForLowConfidence() {
         var tracker = MeetingTracker()
         let low = DetectedMeeting(id: "web:chrome:call", source: "Google Chrome", title: "Custom Call", isGenericTitle: false, highConfidence: false)
-        #expect(tracker.step(detected: low, suppressed: false) == .none)
-        #expect(tracker.step(detected: low, suppressed: false) == .show(low))
+        #expect(tracker.step(detected: low) == .none)
+        #expect(tracker.step(detected: low) == .show(low))
     }
 
-    @Test func trackerSuppressesWhileRecordingAndHidesActiveBanner() {
+    @Test func trackerStaysSilentForTheRecordedCallAndOffersTheNextOne() {
         var tracker = MeetingTracker()
         let meet = DetectedMeeting(id: "zoom:standup", source: "Zoom", title: "Standup", isGenericTitle: false, highConfidence: true)
-        #expect(tracker.step(detected: meet, suppressed: false) == .show(meet))
-        #expect(tracker.step(detected: meet, suppressed: true) == .hide)
-        // Ending recording while still in the same call does not re-pop the banner.
-        #expect(tracker.step(detected: meet, suppressed: false) == .none)
+        #expect(tracker.step(detected: meet) == .show(meet))
+        // Recording starts: every poll dismisses while it lasts.
+        tracker.dismiss()
+        tracker.dismiss()
+        // Recording ends while the call goes on: no banner.
+        #expect(tracker.step(detected: meet) == .none)
+        // The call ends, and the same recurring meeting comes back the next day.
+        for _ in 0..<MeetingTracker.forgetDismissAfterMisses { #expect(tracker.step(detected: nil) == .none) }
+        #expect(tracker.step(detected: meet) == .show(meet))
+    }
+
+    @Test func trackerKeepsSureTitleOverLaterGuess() {
+        var tracker = MeetingTracker()
+        let meet = DetectedMeeting(id: "google-meet:sync", source: "Google Meet", title: "Sync", isGenericTitle: false, highConfidence: true)
+        let guess = DetectedMeeting(id: "web:chrome:docs", source: "Google Chrome", title: "Docs", isGenericTitle: false, highConfidence: false)
+        #expect(tracker.step(detected: meet) == .show(meet))
+        #expect(tracker.step(detected: guess) == .none)
+        #expect(tracker.active == meet)
     }
 }

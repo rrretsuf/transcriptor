@@ -3,7 +3,7 @@ use crate::history::Kind;
 use crate::paste::{self, Outcome};
 use crate::soniox::{run_session, Control, Event};
 use crate::store::{NewEntry, Store};
-use crate::{audio, hotkey, keystore, meeting::Meeting, meeting_detect::MeetingDetectorState, shell};
+use crate::{audio, hotkey, keystore, meeting::Meeting, meeting_detect::MeetingTracker, shell};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,7 +41,7 @@ pub struct App {
     pub unreadable: Vec<&'static str>,
     pub store: Mutex<Store>,
     pub meeting: Mutex<Meeting>,
-    pub meeting_detect: MeetingDetectorState,
+    pub meeting_detect: Mutex<MeetingTracker>,
     pub file: Mutex<FileJob>,
     /// Why the hotkey does not work, for Settings and onboarding to show.
     pub hotkey_problem: Mutex<Option<String>>,
@@ -62,7 +62,7 @@ impl App {
             unreadable,
             store: Mutex::new(store),
             meeting: Mutex::new(Meeting::default()),
-            meeting_detect: MeetingDetectorState::default(),
+            meeting_detect: Mutex::new(MeetingTracker::default()),
             file: Mutex::new(FileJob { status: json!({ "status": "idle" }), task: None }),
             hotkey_problem: Mutex::new(None),
             portal_hotkey: Mutex::new(None),

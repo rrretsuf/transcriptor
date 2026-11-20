@@ -20,18 +20,18 @@ It reads and writes the same `config.json` and `history.json` as the Mac app.
 
 ```
 src-tauri/src
-  main.rs      commands for the windows, startup, command line
+  main.rs           commands for the windows, startup, command line
   app.rs            dictation: hotkey → microphone → Soniox → paste → history
   meeting.rs        meeting: microphone + system audio, pause, continue, end
   meeting_detect.rs automatic meeting detection (WASAPI on Windows, PipeWire/PulseAudio + X11 on Linux)
   soniox.rs         the real-time socket protocol and one session
-  files.rs     file transcription through the Soniox async API
-  audio.rs     capture in shared mode, device changes, system audio mix
-  dsp.rs       resampler to 16 kHz, 40 ms chunks, silence detector
-  store.rs     config.json and history.json, atomic, never overwrites what it cannot read
-  shell.rs     windows, the pill overlay, tray
+  files.rs          file transcription through the Soniox async API
+  audio.rs          capture in shared mode, device changes, system audio mix
+  dsp.rs            resampler to 16 kHz, 40 ms chunks, silence detector
+  store.rs          config.json and history.json, atomic, never overwrites what it cannot read
+  shell.rs          windows, the pill overlay, the meeting banner, tray
   paste.rs  hotkey.rs  keystore.rs  linux.rs (portals)  selftest.rs
-ui/            index.html (onboarding + app), pill.html (overlay)
+ui/            index.html (onboarding + app), pill.html (overlay), meeting-banner.html
 ci/            what CI runs on real Windows and Linux machines
 ```
 

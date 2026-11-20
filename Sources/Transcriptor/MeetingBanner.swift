@@ -30,6 +30,7 @@ final class MeetingBanner {
 
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
+    private var visible = false
 
     func install() {
         guard panel == nil else { return }
@@ -65,10 +66,10 @@ final class MeetingBanner {
 
     func show(_ meeting: DetectedMeeting) {
         install()
-        guard let panel else { return }
+        guard let panel, let placement = computePlacement() else { return }
         hideTask?.cancel()
+        visible = true
 
-        let placement = computePlacement()
         model.meeting = meeting
         model.anchorX = placement.anchorX
         model.open = false
@@ -78,8 +79,9 @@ final class MeetingBanner {
         panel.alphaValue = 1
         panel.orderFrontRegardless()
 
-        DispatchQueue.main.async { [model] in
-            withAnimation(Self.openAnimation) { model.open = true }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.visible else { return }
+            withAnimation(Self.openAnimation) { self.model.open = true }
         }
     }
 
@@ -92,6 +94,7 @@ final class MeetingBanner {
 
     func hide() {
         guard let panel, panel.alphaValue > 0 || model.open else { return }
+        visible = false
         panel.ignoresMouseEvents = true
         withAnimation(Self.closeAnimation) { model.open = false }
         hideTask?.cancel()
@@ -130,9 +133,9 @@ final class MeetingBanner {
         reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.16)
     }
 
-    private func computePlacement() -> (frame: NSRect, anchorX: CGFloat) {
+    private func computePlacement() -> (frame: NSRect, anchorX: CGFloat)? {
         let iconRect = resolveStatusItemRect()
-        let screen = screenFor(rect: iconRect)
+        guard let screen = screenFor(rect: iconRect) else { return nil }
         let visible = screen.visibleFrame
         let screenEdgePad: CGFloat = 12
 
@@ -174,7 +177,7 @@ final class MeetingBanner {
         }?.frame
     }
 
-    private func screenFor(rect: NSRect?) -> NSScreen {
+    private func screenFor(rect: NSRect?) -> NSScreen? {
         if let rect {
             let center = NSPoint(x: rect.midX, y: rect.midY)
             if let match = NSScreen.screens.first(where: { $0.frame.contains(center) }) {
@@ -182,7 +185,7 @@ final class MeetingBanner {
             }
         }
         let mouse = NSEvent.mouseLocation
-        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens[0]
+        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main ?? NSScreen.screens.first
     }
 }
 

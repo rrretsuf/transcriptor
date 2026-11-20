@@ -143,7 +143,8 @@ The menu bar icon animates while recording; its menu holds
   change of voice starts a "Speaker N:" paragraph. Pause, continue, end; the full
   transcript is ready to copy. On macOS, the first meeting asks for the
   **System Audio Recording** permission (**Screen Recording** before macOS 14.2);
-  without it the meeting uses the microphone only. Can be toggled in Settings › General.
+  without it the meeting uses the microphone only. Detection works on Windows,
+  Linux and macOS 14.2 or later, and can be turned off in Settings › General.
 
 Both save their transcripts to **All Transcriptions**. Meetings and files are kept
 for good; the oldest dictations fall off after 5,000.

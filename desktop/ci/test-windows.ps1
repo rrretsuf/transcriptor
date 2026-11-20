@@ -14,6 +14,8 @@ Add-Type -Namespace Native -Name Keys -MemberDefinition @'
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr window, System.Text.StringBuilder text, int max);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, System.UIntPtr extra);
 '@
 function Foreground {
     $title = New-Object System.Text.StringBuilder 256
@@ -59,6 +61,17 @@ function End-To-End([bool]$Dictation, [string]$Expect) {
     Wait-For (Join-Path $dir "selftest-ready") 30
     Start-Sleep -Milliseconds 500
     if ((Foreground) -ne "Target") { throw "the target window does not have the keyboard, '$(Foreground)' has it" }
+
+    # The meeting banner's Dismiss is clicked; the other app must keep the keyboard.
+    Wait-For (Join-Path $dir "selftest-banner") 20
+    $x, $y = (Get-Content (Join-Path $dir "selftest-banner")).Split(" ")
+    [Native.Keys]::SetCursorPos([int]$x, [int]$y) | Out-Null
+    [Native.Keys]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    [Native.Keys]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 500
+    if ((Foreground) -ne "Target") { throw "the meeting banner took the keyboard: '$(Foreground)' is in front" }
+    Set-Content (Join-Path $dir "selftest-banner-clicked") "clicked"
+    Start-Sleep -Seconds 1
 
     Press-Hotkey
     Start-Sleep -Milliseconds 500

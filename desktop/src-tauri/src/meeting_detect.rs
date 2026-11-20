@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::{meeting, shell};
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::async_runtime::{spawn, spawn_blocking};
 
@@ -158,6 +158,7 @@ impl MeetingMatcher {
                 .cmp(&a.has_mic)
                 .then(b.is_frontmost.cmp(&a.is_frontmost))
                 .then(b.has_output.cmp(&a.has_output))
+                .then(a.process_name.cmp(&b.process_name))
         });
 
         for app in ordered {
@@ -359,63 +360,52 @@ impl MeetingMatcher {
     }
 
     fn match_browser(browser_name: &str, app: &AppSnapshot) -> Option<DetectedMeeting> {
-        let mic = app.has_mic;
-        if !mic && !app.has_output {
+        let titles: Vec<String> = app
+            .window_titles
+            .iter()
+            .map(|t| clean_browser_title(t))
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        // Muted in Google Meet: the browser releases the microphone while the call
+        // keeps playing. Only a Meet call title counts then, never the Meet home page.
+        if !app.has_mic {
+            if !app.has_output {
+                return None;
+            }
+            return titles
+                .iter()
+                .filter_map(|t| match_known_web_platform(t))
+                .find(|m| m.source == "Google Meet" && m.id != "google-meet:call")
+                .map(|m| DetectedMeeting { high_confidence: false, ..m });
+        }
+
+        if let Some(known) = titles.iter().find_map(|t| match_known_web_platform(t)) {
+            return Some(known);
+        }
+
+        // Universal WebRTC fallback: the browser both records and plays.
+        if !app.has_output {
             return None;
         }
-
-        // First: try explicit known web meeting platforms from any window title.
-        for raw in &app.window_titles {
-            let cleaned = clean_browser_title(raw);
-            if cleaned.is_empty() {
-                continue;
-            }
-            if let Some(known) = match_known_web_platform(&cleaned) {
-                if !mic && !app.has_output {
-                    continue;
-                }
-                return Some(known);
-            }
+        if titles.iter().any(|t| {
+            let lower = t.to_lowercase();
+            EXCLUDED_WEB_KEYWORDS.iter().any(|k| lower.contains(k))
+        }) {
+            return None;
         }
-
-        // Second: universal WebRTC fallback when BOTH mic and speakers are active in the browser.
-        if mic && app.has_output {
-            // If window titles are readable (Windows / Linux X11 / XWayland), check exclusions first.
-            let cleaned_titles: Vec<String> = app
-                .window_titles
-                .iter()
-                .map(|t| clean_browser_title(t))
-                .filter(|t| !t.is_empty())
-                .collect();
-
-            if !cleaned_titles.is_empty() {
-                for cleaned in &cleaned_titles {
-                    let lower = cleaned.to_lowercase();
-                    if EXCLUDED_WEB_KEYWORDS.iter().any(|k| lower.contains(k)) {
-                        return None;
-                    }
-                }
-                let candidate = cleaned_titles[0].clone();
-                return Some(DetectedMeeting {
-                    id: format!("web:{}:{}", browser_name.to_lowercase(), candidate.to_lowercase()),
-                    source: browser_name.into(),
-                    title: candidate,
-                    is_generic_title: false,
-                    high_confidence: false,
-                });
-            }
-
-            // Pure Wayland fallback: no X11 titles exposed, but browser has both mic + speakers live.
-            return Some(DetectedMeeting {
-                id: format!("web:{}:call", browser_name.to_lowercase()),
-                source: browser_name.into(),
-                title: format!("{browser_name} Meeting"),
-                is_generic_title: true,
-                high_confidence: false,
-            });
-        }
-
-        None
+        let (title, is_generic_title) = match titles.first() {
+            Some(title) => (title.clone(), false),
+            // Pure Wayland: the compositor shows no window titles.
+            None => (format!("{browser_name} Meeting"), true),
+        };
+        Some(DetectedMeeting {
+            id: format!("web:{}:{}", browser_name.to_lowercase(), title.to_lowercase()),
+            source: browser_name.into(),
+            title,
+            is_generic_title,
+            high_confidence: false,
+        })
     }
 }
 
@@ -710,6 +700,12 @@ pub enum TrackerAction {
     Hide,
 }
 
+/// Polls without a meeting before a visible banner hides (~6 s).
+const HIDE_AFTER_MISSES: u32 = 3;
+/// Polls without a meeting before a closed banner may come back (~30 s), so a
+/// short silence or a look at another tab does not bring it back.
+const FORGET_DISMISS_AFTER_MISSES: u32 = 15;
+
 #[derive(Default)]
 pub struct MeetingTracker {
     pub active: Option<DetectedMeeting>,
@@ -720,46 +716,37 @@ pub struct MeetingTracker {
 }
 
 impl MeetingTracker {
-    pub fn step(&mut self, detected: Option<DetectedMeeting>, suppressed: bool) -> TrackerAction {
+    pub fn step(&mut self, detected: Option<DetectedMeeting>) -> TrackerAction {
         let Some(detected) = detected else {
             self.pending_id = None;
             self.pending_polls = 0;
-            self.consecutive_misses += 1;
-            if self.consecutive_misses >= 3 {
-                let was_active = self.active.is_some();
-                self.active = None;
-                self.dismissed = false;
-                return if was_active { TrackerAction::Hide } else { TrackerAction::None };
+            if self.active.is_none() && !self.dismissed {
+                return TrackerAction::None;
             }
-            return TrackerAction::None;
+            self.consecutive_misses += 1;
+            let limit = if self.active.is_some() { HIDE_AFTER_MISSES } else { FORGET_DISMISS_AFTER_MISSES };
+            if self.consecutive_misses < limit {
+                return TrackerAction::None;
+            }
+            let was_active = self.active.take().is_some();
+            self.dismissed = false;
+            self.consecutive_misses = 0;
+            return if was_active { TrackerAction::Hide } else { TrackerAction::None };
         };
 
         self.consecutive_misses = 0;
-
-        if suppressed {
-            let was_active = self.active.is_some();
-            self.active = None;
-            self.dismissed = true;
-            return if was_active { TrackerAction::Hide } else { TrackerAction::None };
-        }
-
         if self.dismissed {
             return TrackerAction::None;
         }
 
         if let Some(current) = &self.active {
-            if current.title != detected.title || current.source != detected.source {
+            // A guess never replaces a sure title (e.g. the user switched away from the Meet tab).
+            let changed = current.title != detected.title || current.source != detected.source;
+            if changed && (detected.high_confidence || !current.high_confidence) {
                 self.active = Some(detected.clone());
                 return TrackerAction::Update(detected);
             }
             return TrackerAction::None;
-        }
-
-        if detected.high_confidence {
-            self.pending_id = None;
-            self.pending_polls = 0;
-            self.active = Some(detected.clone());
-            return TrackerAction::Show(detected);
         }
 
         if self.pending_id.as_deref() == Some(detected.id.as_str()) {
@@ -768,55 +755,46 @@ impl MeetingTracker {
             self.pending_id = Some(detected.id.clone());
             self.pending_polls = 1;
         }
-
-        if self.pending_polls >= 2 {
-            self.pending_id = None;
-            self.pending_polls = 0;
-            self.active = Some(detected.clone());
-            return TrackerAction::Show(detected);
+        let required = if detected.high_confidence { 1 } else { 2 };
+        if self.pending_polls < required {
+            return TrackerAction::None;
         }
-
-        TrackerAction::None
+        self.pending_id = None;
+        self.pending_polls = 0;
+        self.active = Some(detected.clone());
+        TrackerAction::Show(detected)
     }
 
+    /// Silences the current call until it ends: after the user closes the banner,
+    /// and on every poll while Transcriptor records.
     pub fn dismiss(&mut self) {
         self.active = None;
         self.pending_id = None;
         self.pending_polls = 0;
-        self.dismissed = true;
-    }
-
-    pub fn reset(&mut self) {
-        self.active = None;
-        self.pending_id = None;
-        self.pending_polls = 0;
-        self.dismissed = false;
         self.consecutive_misses = 0;
+        self.dismissed = true;
     }
 }
 
 /* ----------------------------- runtime state ------------------------------ */
 
-#[derive(Default)]
-pub struct MeetingDetectorState {
-    tracker: Mutex<MeetingTracker>,
-}
-
-impl MeetingDetectorState {
-    pub fn current(&self) -> Option<DetectedMeeting> {
-        self.tracker.lock().unwrap().active.clone()
-    }
-
-    pub fn reset(&self) {
-        self.tracker.lock().unwrap().reset();
-    }
-
-    pub fn dismiss(&self) {
-        self.tracker.lock().unwrap().dismiss();
+/// Dismisses the current call; hides the banner when it was showing.
+fn silence(app: &Arc<App>) {
+    let was_active = {
+        let mut tracker = app.meeting_detect.lock().unwrap();
+        let was_active = tracker.active.is_some();
+        tracker.dismiss();
+        was_active
+    };
+    if was_active {
+        shell::hide_meeting_banner(&app.handle);
     }
 }
 
 pub fn start_monitor(app: Arc<App>) {
+    if !cfg!(any(target_os = "windows", target_os = "linux")) {
+        return;
+    }
     spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -825,22 +803,22 @@ pub fn start_monitor(app: Arc<App>) {
         loop {
             interval.tick().await;
             if !app.config().detect_meetings {
-                let had_active = {
-                    let mut tracker = app.meeting_detect.tracker.lock().unwrap();
-                    let had = tracker.active.is_some();
-                    tracker.reset();
-                    had
-                };
-                if had_active {
-                    shell::hide_meeting_banner(&app.handle);
-                }
                 continue;
             }
-
-            let suppressed = app.meeting.lock().unwrap().is_active();
+            if app.meeting.lock().unwrap().is_active() {
+                silence(&app);
+                continue;
+            }
             let snapshot = spawn_blocking(probe_system).await.unwrap_or_default();
-            let detected = MeetingMatcher::detect(&snapshot);
-            let action = app.meeting_detect.tracker.lock().unwrap().step(detected, suppressed);
+            // A recording may have started, or detection been turned off, during the probe.
+            if !app.config().detect_meetings {
+                continue;
+            }
+            if app.meeting.lock().unwrap().is_active() {
+                silence(&app);
+                continue;
+            }
+            let action = app.meeting_detect.lock().unwrap().step(MeetingMatcher::detect(&snapshot));
             match action {
                 TrackerAction::Show(meeting) => shell::show_meeting_banner(&app.handle, &meeting),
                 TrackerAction::Update(meeting) => shell::update_meeting_banner(&app.handle, &meeting),
@@ -853,24 +831,20 @@ pub fn start_monitor(app: Arc<App>) {
 
 pub fn apply_enabled(app: &Arc<App>) {
     if !app.config().detect_meetings {
-        app.meeting_detect.reset();
+        *app.meeting_detect.lock().unwrap() = MeetingTracker::default();
         shell::hide_meeting_banner(&app.handle);
     }
 }
 
 pub fn dismiss_banner(app: &Arc<App>) {
-    app.meeting_detect.dismiss();
+    app.meeting_detect.lock().unwrap().dismiss();
     shell::hide_meeting_banner(&app.handle);
 }
 
 pub fn start_detected_meeting(app: &Arc<App>) {
-    let title = app.meeting_detect.current().map(|m| m.title);
-    app.meeting_detect.dismiss();
-    shell::hide_meeting_banner(&app.handle);
-    if !app.meeting.lock().unwrap().is_active() {
-        meeting::reset(app);
-        meeting::start_with_title(app, title);
-    }
+    let title = app.meeting_detect.lock().unwrap().active.as_ref().map(|m| m.title.clone());
+    dismiss_banner(app);
+    meeting::start_with_title(app, title);
     shell::show_main(app, "meeting");
 }
 
@@ -882,8 +856,8 @@ fn probe_system() -> SystemSnapshot {
     use windows::core::{BOOL, Interface, PWSTR};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
     use windows::Win32::Media::Audio::{
-        eCapture, eCommunications, eConsole, eRender, AudioSessionStateActive, EDataFlow, ERole, IAudioSessionControl2,
-        IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator,
+        eCapture, eRender, AudioSessionStateActive, EDataFlow, IAudioSessionControl2, IAudioSessionManager2,
+        IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
     };
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
     use windows::Win32::System::Threading::{
@@ -918,10 +892,15 @@ fn probe_system() -> SystemSnapshot {
         }
     }
 
+    /// Every active device counts: a call on a headset that is not the Windows default too.
     fn active_pids(enumerator: &IMMDeviceEnumerator, flow: EDataFlow) -> HashSet<u32> {
         let mut pids = HashSet::new();
-        for role in [eCommunications, eConsole] as [ERole; 2] {
-            let Ok(device) = (unsafe { enumerator.GetDefaultAudioEndpoint(flow, role) }) else {
+        let Ok(devices) = (unsafe { enumerator.EnumAudioEndpoints(flow, DEVICE_STATE_ACTIVE) }) else {
+            return pids;
+        };
+        let count = unsafe { devices.GetCount() }.unwrap_or(0);
+        for index in 0..count {
+            let Ok(device) = (unsafe { devices.Item(index) }) else {
                 continue;
             };
             let Ok(manager) = (unsafe { device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) }) else {
@@ -1053,7 +1032,6 @@ fn probe_system() -> SystemSnapshot {
 struct PactlStream {
     pid: Option<u32>,
     binary: String,
-    media_name: Option<String>,
     corked: bool,
 }
 
@@ -1075,7 +1053,7 @@ fn parse_pactl_streams(output: &str) -> Vec<PactlStream> {
         let line = raw_line.trim();
         if (raw_line.starts_with("Source Output #") || raw_line.starts_with("Sink Input #")) && !raw_line.starts_with(' ') {
             flush(&mut streams, &mut current);
-            current = Some(PactlStream { pid: None, binary: String::new(), media_name: None, corked: false });
+            current = Some(PactlStream { pid: None, binary: String::new(), corked: false });
             continue;
         }
         let Some(stream) = current.as_mut() else {
@@ -1091,11 +1069,6 @@ fn parse_pactl_streams(output: &str) -> Vec<PactlStream> {
             if stream.binary.is_empty() {
                 stream.binary = normalize_process_name(val);
             }
-        } else if let Some(val) = line.strip_prefix("media.name =") {
-            let cleaned = val.trim().trim_matches('"').trim().to_string();
-            if !cleaned.is_empty() {
-                stream.media_name = Some(cleaned);
-            }
         }
     }
     flush(&mut streams, &mut current);
@@ -1107,20 +1080,44 @@ fn probe_system() -> SystemSnapshot {
     use std::collections::HashMap;
     use std::process::{Command, Stdio};
 
+    /// A sound server that does not answer within a second is killed, so detection never stalls.
     fn run_pactl(kind: &str) -> Vec<PactlStream> {
-        let Ok(output) = Command::new("pactl")
+        use std::io::Read;
+        use std::time::Instant;
+        static MISSING: std::sync::Once = std::sync::Once::new();
+        let child = Command::new("pactl")
             .args(["list", kind])
             .env("LC_ALL", "C")
             .stdin(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .output()
-        else {
-            return Vec::new();
+            .spawn();
+        let mut child = match child {
+            Ok(child) => child,
+            Err(err) => {
+                MISSING.call_once(|| eprintln!("meeting detection off: pactl did not start ({err}); install pulseaudio-utils"));
+                return Vec::new();
+            }
         };
-        if !output.status.success() {
-            return Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stdout.read_to_string(&mut text);
+            text
+        });
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return parse_pactl_streams(&reader.join().unwrap_or_default()),
+                Ok(Some(_)) | Err(_) => return Vec::new(),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Vec::new();
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            }
         }
-        parse_pactl_streams(&String::from_utf8_lossy(&output.stdout))
     }
 
     fn process_name_for_pid(pid: u32) -> Option<String> {
@@ -1462,18 +1459,75 @@ Source Output #43
             is_generic_title: false,
             high_confidence: true,
         };
-        assert_eq!(tracker.step(Some(generic.clone()), false), TrackerAction::Show(generic.clone()));
-        assert_eq!(tracker.step(Some(named.clone()), false), TrackerAction::Update(named.clone()));
-        assert_eq!(tracker.step(None, false), TrackerAction::None);
-        assert_eq!(tracker.step(None, false), TrackerAction::None);
+        assert_eq!(tracker.step(Some(generic.clone())), TrackerAction::Show(generic.clone()));
+        assert_eq!(tracker.step(Some(named.clone())), TrackerAction::Update(named.clone()));
+        assert_eq!(tracker.step(None), TrackerAction::None);
+        assert_eq!(tracker.step(None), TrackerAction::None);
         tracker.dismiss();
-        assert_eq!(tracker.step(Some(named.clone()), false), TrackerAction::None);
-        assert_eq!(tracker.step(None, false), TrackerAction::None);
-        assert_eq!(tracker.step(None, false), TrackerAction::None);
-        assert_eq!(tracker.step(None, false), TrackerAction::None);
-        assert_eq!(tracker.step(Some(named.clone()), false), TrackerAction::Show(named.clone()));
-        assert_eq!(tracker.step(Some(named.clone()), true), TrackerAction::Hide);
-        assert_eq!(tracker.step(Some(named), false), TrackerAction::None);
+        assert_eq!(tracker.step(Some(named.clone())), TrackerAction::None);
+        // A short silence or another tab in front does not bring a closed banner back.
+        for _ in 0..FORGET_DISMISS_AFTER_MISSES - 1 {
+            assert_eq!(tracker.step(None), TrackerAction::None);
+        }
+        assert_eq!(tracker.step(Some(named.clone())), TrackerAction::None);
+        // The call ended: the next one is offered again.
+        for _ in 0..FORGET_DISMISS_AFTER_MISSES {
+            assert_eq!(tracker.step(None), TrackerAction::None);
+        }
+        assert_eq!(tracker.step(Some(named.clone())), TrackerAction::Show(named.clone()));
+        // A recording silences the call it records, also after it ends.
+        tracker.dismiss();
+        assert_eq!(tracker.step(Some(named.clone())), TrackerAction::None);
+        assert!(tracker.active.is_none());
+    }
+
+    #[test]
+    fn tracker_keeps_sure_title_over_later_guess() {
+        let mut tracker = MeetingTracker::default();
+        let meet = DetectedMeeting {
+            id: "google-meet:sync".into(),
+            source: "Google Meet".into(),
+            title: "Sync".into(),
+            is_generic_title: false,
+            high_confidence: true,
+        };
+        let docs = DetectedMeeting {
+            id: "web:chrome:q3 plan - google docs".into(),
+            source: "Google Chrome".into(),
+            title: "Q3 Plan - Google Docs".into(),
+            is_generic_title: false,
+            high_confidence: false,
+        };
+        assert_eq!(tracker.step(Some(meet.clone())), TrackerAction::Show(meet.clone()));
+        assert_eq!(tracker.step(Some(docs)), TrackerAction::None);
+        assert_eq!(tracker.active, Some(meet));
+    }
+
+    #[test]
+    fn browser_without_microphone_is_no_meeting() {
+        let s = snap(vec![AppSnapshot {
+            process_name: "chrome".into(),
+            window_titles: vec![
+                "WhatsApp - Google Chrome".into(),
+                "Chat | Ana Novak | Microsoft Teams - Google Chrome".into(),
+                "Google Meet - Google Chrome".into(),
+            ],
+            is_frontmost: true,
+            has_mic: false,
+            has_output: true,
+        }]);
+        assert_eq!(MeetingMatcher::detect(&s), None);
+
+        let muted_meet = snap(vec![AppSnapshot {
+            process_name: "chrome".into(),
+            window_titles: vec!["Meet – Weekly Sync - Google Chrome".into()],
+            is_frontmost: true,
+            has_mic: false,
+            has_output: true,
+        }]);
+        let m = MeetingMatcher::detect(&muted_meet).unwrap();
+        assert_eq!(m.title, "Weekly Sync");
+        assert!(!m.high_confidence);
     }
 
     #[test]
@@ -1486,7 +1540,7 @@ Source Output #43
             is_generic_title: false,
             high_confidence: false,
         };
-        assert_eq!(tracker.step(Some(low.clone()), false), TrackerAction::None);
-        assert_eq!(tracker.step(Some(low.clone()), false), TrackerAction::Show(low));
+        assert_eq!(tracker.step(Some(low.clone())), TrackerAction::None);
+        assert_eq!(tracker.step(Some(low.clone())), TrackerAction::Show(low));
     }
 }

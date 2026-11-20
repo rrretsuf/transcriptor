@@ -47,15 +47,6 @@ struct AppSnapshot: Equatable, Sendable {
 
 struct SystemSnapshot: Equatable, Sendable {
     let apps: [AppSnapshot]
-    /// Fallback for macOS 13–14.1 where per-process CoreAudio status is unavailable.
-    let globalMicActive: Bool
-    let supportsPerProcessAudio: Bool
-
-    init(apps: [AppSnapshot], globalMicActive: Bool = false, supportsPerProcessAudio: Bool = true) {
-        self.apps = apps
-        self.globalMicActive = globalMicActive
-        self.supportsPerProcessAudio = supportsPerProcessAudio
-    }
 }
 
 // MARK: - Pure classification & title extraction
@@ -114,66 +105,28 @@ enum MeetingMatcher {
     ]
 
     static func detect(in snapshot: SystemSnapshot) -> DetectedMeeting? {
-        // 1. FaceTime / Continuity calls run audio inside avconferenced or TelephonyUtilities.
-        if let facetime = matchFaceTime(in: snapshot, requireDaemon: !snapshot.supportsPerProcessAudio) {
-            return facetime
-        }
+        // FaceTime / Continuity calls run audio inside avconferenced or TelephonyUtilities.
+        if let facetime = matchFaceTime(in: snapshot) { return facetime }
 
-        // 2. Prefer apps with active mic input first, then known meeting apps with output.
         let ordered = snapshot.apps.sorted { a, b in
             if a.hasMic != b.hasMic { return a.hasMic }
-            if a.isFrontmost != b.isFrontmost { return a.isFrontmost }
-            return a.hasOutput && !b.hasOutput
-        }
-
-        // On macOS 14.2+ per-process audio tells us the exact app using the mic.
-        if snapshot.supportsPerProcessAudio {
-            for app in ordered {
-                if app.bundleID == "com.transcriptor.app" { continue }
-                if let native = matchNative(app, snapshot: snapshot) { return native }
-                if isBrowserBundleID(app.bundleID),
-                   let web = matchBrowser(app, snapshot: snapshot) { return web }
-            }
-            return nil
-        }
-
-        // On macOS 13–14.1 we only know a mic is globally active, so prefer apps
-        // with an explicit meeting window/tab before falling back to an idle native app.
-        var best: (rank: Int, meeting: DetectedMeeting)?
-        func consider(_ meeting: DetectedMeeting, app: AppSnapshot, explicitWeb: Bool) {
-            let rank = (explicitWeb || !meeting.isGenericTitle ? 4 : 0)
-                + (app.isFrontmost ? 2 : 0)
-                + (meeting.highConfidence ? 1 : 0)
-            if best == nil || rank > best!.rank {
-                best = (rank, meeting)
-            }
-        }
-
-        if let ft = matchFaceTime(in: snapshot, requireDaemon: false),
-           let ftApp = snapshot.apps.first(where: { $0.bundleID == "com.apple.FaceTime" }) {
-            consider(ft, app: ftApp, explicitWeb: false)
+            return a.isFrontmost && !b.isFrontmost
         }
         for app in ordered {
-            if app.bundleID == "com.transcriptor.app" { continue }
-            if let native = matchNative(app, snapshot: snapshot) {
-                consider(native, app: app, explicitWeb: false)
-            } else if isBrowserBundleID(app.bundleID),
-                      let web = matchBrowser(app, snapshot: snapshot) {
-                consider(web, app: app, explicitWeb: web.highConfidence)
-            }
+            if let native = matchNative(app) { return native }
+            if isBrowserBundleID(app.bundleID), let web = matchBrowser(app) { return web }
         }
-        return best?.meeting
+        return nil
     }
 
     // MARK: Native apps
 
-    private static func matchFaceTime(in snapshot: SystemSnapshot, requireDaemon: Bool = false) -> DetectedMeeting? {
+    private static func matchFaceTime(in snapshot: SystemSnapshot) -> DetectedMeeting? {
         let daemonActive = snapshot.apps.contains {
             ($0.bundleID == "com.apple.avconferenced" || $0.bundleID == "com.apple.TelephonyUtilities") && $0.hasMic
         }
         let app = snapshot.apps.first { $0.bundleID == "com.apple.FaceTime" }
-        let appActive = !requireDaemon && ((app?.hasMic ?? false) || (!snapshot.supportsPerProcessAudio && snapshot.globalMicActive && app != nil))
-        guard daemonActive || appActive else { return nil }
+        guard daemonActive || app?.hasMic == true else { return nil }
 
         let specific = app?.windowTitles
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -188,8 +141,11 @@ enum MeetingMatcher {
         )
     }
 
-    private static func matchNative(_ app: AppSnapshot, snapshot: SystemSnapshot) -> DetectedMeeting? {
-        let mic = app.hasMic || (!snapshot.supportsPerProcessAudio && snapshot.globalMicActive)
+    private static func matchNative(_ app: AppSnapshot) -> DetectedMeeting? {
+        let mic = app.hasMic
+        if mic, let simple = simpleCallApps[app.bundleID] {
+            return simpleNative(simple, titles: app.windowTitles)
+        }
 
         switch app.bundleID {
         case "us.zoom.xos", "us.zoom.videomeetings":
@@ -208,7 +164,6 @@ enum MeetingMatcher {
                 return !lobby.contains(l) && !l.hasPrefix("zoom meeting") && !l.hasPrefix("zoom webinar")
             }
             guard mic || (app.hasOutput && meetingWindow != nil) else { return nil }
-            if !mic && !app.hasOutput { return nil }
             let title = topic ?? (meetingWindow?.lowercased().contains("webinar") == true ? "Zoom Webinar" : "Zoom Meeting")
             return DetectedMeeting(
                 id: "zoom:\(title.lowercased())",
@@ -226,8 +181,8 @@ enum MeetingMatcher {
             let candidates = app.windowTitles
                 .map { stripLeadingBadge($0) }
                 .compactMap { stripSuffix($0, suffixes: [" | Microsoft Teams", " - Microsoft Teams"]) }
+            guard mic else { return nil }
             let specific = candidates.first { !lobby.contains($0.lowercased()) }
-            guard mic || (app.hasOutput && specific != nil) else { return nil }
             let title = specific ?? "Microsoft Teams"
             return DetectedMeeting(
                 id: "teams:\(title.lowercased())",
@@ -266,8 +221,7 @@ enum MeetingMatcher {
             )
 
         case "Cisco-Systems.Spark", "com.cisco.webexmeetingsapp", "com.webex.meetingmanager":
-            let meetingWindow = app.windowTitles.first { $0.localizedCaseInsensitiveContains("meeting") }
-            guard mic || (app.hasOutput && meetingWindow != nil) else { return nil }
+            guard mic else { return nil }
             let specific = app.windowTitles
                 .map { stripLeadingBadge($0) }
                 .compactMap { stripSuffix($0, suffixes: [" - Cisco Webex Meetings", " - Webex", " | Webex"]) }
@@ -281,89 +235,47 @@ enum MeetingMatcher {
                 highConfidence: mic
             )
 
-        case "net.whatsapp.WhatsApp", "desktop.WhatsApp":
-            guard mic else { return nil }
-            return simpleNative(id: "whatsapp", source: "WhatsApp", fallback: "WhatsApp Call", titles: app.windowTitles, ignore: ["WhatsApp"])
-
-        case "ru.keepcoder.Telegram", "org.telegram.desktop":
-            guard mic else { return nil }
-            return simpleNative(id: "telegram", source: "Telegram", fallback: "Telegram Call", titles: app.windowTitles, ignore: ["Telegram"])
-
-        case "org.whispersystems.signal-desktop":
-            guard mic else { return nil }
-            return simpleNative(id: "signal", source: "Signal", fallback: "Signal Call", titles: app.windowTitles, ignore: ["Signal"])
-
-        case "com.facebook.archon", "com.facebook.Messenger":
-            guard mic else { return nil }
-            return simpleNative(id: "messenger", source: "Messenger", fallback: "Messenger Call", titles: app.windowTitles, ignore: ["Messenger"])
-
-        case "com.viber.osx":
-            guard mic else { return nil }
-            return simpleNative(id: "viber", source: "Viber", fallback: "Viber Call", titles: app.windowTitles, ignore: ["Viber"])
-
-        case "com.larksuite.Lark", "com.electron.lark":
-            guard mic else { return nil }
-            return simpleNative(id: "lark", source: "Lark", fallback: "Lark Meeting", titles: app.windowTitles, ignore: ["Lark", "Feishu"])
-
-        case "im.riot.app":
-            guard mic else { return nil }
-            return simpleNative(id: "element", source: "Element", fallback: "Element Call", titles: app.windowTitles, ignore: ["Element"])
-
-        case "com.figma.Desktop":
-            guard mic else { return nil }
-            return simpleNative(id: "figma", source: "Figma Audio", fallback: "Figma Audio", titles: app.windowTitles, ignore: ["Figma"])
-
-        case "app.tuple.app":
-            guard mic else { return nil }
-            return simpleNative(id: "tuple", source: "Tuple", fallback: "Tuple Call", titles: app.windowTitles, ignore: ["Tuple"])
-
-        case "com.gather.GatherV2":
-            guard mic else { return nil }
-            return simpleNative(id: "gather", source: "Gather", fallback: "Gather", titles: app.windowTitles, ignore: ["Gather"])
-
-        case "com.amazon.Amazon-Chime":
-            guard mic else { return nil }
-            return simpleNative(id: "chime", source: "Amazon Chime", fallback: "Amazon Chime", titles: app.windowTitles, ignore: ["Amazon Chime"])
-
-        case "com.ringcentral.glip", "com.ringcentral.rcapp":
-            guard mic else { return nil }
-            return simpleNative(id: "ringcentral", source: "RingCentral", fallback: "RingCentral", titles: app.windowTitles, ignore: ["RingCentral"])
-
-        case "com.logmein.goto", "com.logmein.GoToMeeting":
-            guard mic else { return nil }
-            return simpleNative(id: "goto", source: "GoTo Meeting", fallback: "GoTo Meeting", titles: app.windowTitles, ignore: ["GoTo", "GoTo Meeting"])
-
-        case "com.skype.skype":
-            guard mic else { return nil }
-            return simpleNative(id: "skype", source: "Skype", fallback: "Skype Call", titles: app.windowTitles, ignore: ["Skype"])
-
-        case "co.around.Around":
-            guard mic else { return nil }
-            return simpleNative(id: "around", source: "Around", fallback: "Around", titles: app.windowTitles, ignore: ["Around"])
-
-        case "chat.tandem.Tandem":
-            guard mic else { return nil }
-            return simpleNative(id: "tandem", source: "Tandem", fallback: "Tandem", titles: app.windowTitles, ignore: ["Tandem"])
-
-        case "com.pop.pop.app":
-            guard mic else { return nil }
-            return simpleNative(id: "pop", source: "Pop", fallback: "Pop Call", titles: app.windowTitles, ignore: ["Pop"])
-
         default:
             return nil
         }
     }
 
-    private static func simpleNative(id: String, source: String, fallback: String,
-                                     titles: [String], ignore: [String]) -> DetectedMeeting {
-        let ignored = Set(ignore.map { $0.lowercased() })
+    private struct SimpleCallApp {
+        let id: String, source: String, fallback: String, ignore: Set<String>
+    }
+
+    /// Apps whose microphone use is a call; the first non-generic window title names it.
+    private static let simpleCallApps: [String: SimpleCallApp] = {
+        let apps: [([String], SimpleCallApp)] = [
+            (["net.whatsapp.WhatsApp", "desktop.WhatsApp"], .init(id: "whatsapp", source: "WhatsApp", fallback: "WhatsApp Call", ignore: ["whatsapp"])),
+            (["ru.keepcoder.Telegram", "org.telegram.desktop"], .init(id: "telegram", source: "Telegram", fallback: "Telegram Call", ignore: ["telegram"])),
+            (["org.whispersystems.signal-desktop"], .init(id: "signal", source: "Signal", fallback: "Signal Call", ignore: ["signal"])),
+            (["com.facebook.archon", "com.facebook.Messenger"], .init(id: "messenger", source: "Messenger", fallback: "Messenger Call", ignore: ["messenger"])),
+            (["com.viber.osx"], .init(id: "viber", source: "Viber", fallback: "Viber Call", ignore: ["viber"])),
+            (["com.larksuite.Lark", "com.electron.lark"], .init(id: "lark", source: "Lark", fallback: "Lark Meeting", ignore: ["lark", "feishu"])),
+            (["im.riot.app"], .init(id: "element", source: "Element", fallback: "Element Call", ignore: ["element"])),
+            (["com.figma.Desktop"], .init(id: "figma", source: "Figma Audio", fallback: "Figma Audio", ignore: ["figma"])),
+            (["app.tuple.app"], .init(id: "tuple", source: "Tuple", fallback: "Tuple Call", ignore: ["tuple"])),
+            (["com.gather.GatherV2"], .init(id: "gather", source: "Gather", fallback: "Gather", ignore: ["gather"])),
+            (["com.amazon.Amazon-Chime"], .init(id: "chime", source: "Amazon Chime", fallback: "Amazon Chime", ignore: ["amazon chime"])),
+            (["com.ringcentral.glip", "com.ringcentral.rcapp"], .init(id: "ringcentral", source: "RingCentral", fallback: "RingCentral", ignore: ["ringcentral"])),
+            (["com.logmein.goto", "com.logmein.GoToMeeting"], .init(id: "goto", source: "GoTo Meeting", fallback: "GoTo Meeting", ignore: ["goto", "goto meeting"])),
+            (["com.skype.skype"], .init(id: "skype", source: "Skype", fallback: "Skype Call", ignore: ["skype"])),
+            (["co.around.Around"], .init(id: "around", source: "Around", fallback: "Around", ignore: ["around"])),
+            (["chat.tandem.Tandem"], .init(id: "tandem", source: "Tandem", fallback: "Tandem", ignore: ["tandem"])),
+            (["com.pop.pop.app"], .init(id: "pop", source: "Pop", fallback: "Pop Call", ignore: ["pop"])),
+        ]
+        return Dictionary(uniqueKeysWithValues: apps.flatMap { ids, app in ids.map { ($0, app) } })
+    }()
+
+    private static func simpleNative(_ app: SimpleCallApp, titles: [String]) -> DetectedMeeting {
         let specific = titles
             .map { stripLeadingBadge($0) }
-            .first { !$0.isEmpty && !ignored.contains($0.lowercased()) }
-        let title = specific ?? fallback
+            .first { !$0.isEmpty && !app.ignore.contains($0.lowercased()) }
+        let title = specific ?? app.fallback
         return DetectedMeeting(
-            id: "\(id):\(title.lowercased())",
-            source: source,
+            id: "\(app.id):\(title.lowercased())",
+            source: app.source,
             title: title,
             isGenericTitle: specific == nil,
             highConfidence: true
@@ -372,34 +284,31 @@ enum MeetingMatcher {
 
     // MARK: Browsers
 
-    private static func matchBrowser(_ app: AppSnapshot, snapshot: SystemSnapshot) -> DetectedMeeting? {
-        let mic = app.hasMic || (!snapshot.supportsPerProcessAudio && snapshot.globalMicActive)
-        let activeAudio = mic || app.hasOutput
-        guard activeAudio else { return nil }
+    private static func matchBrowser(_ app: AppSnapshot) -> DetectedMeeting? {
+        let badgedTabs = app.tabTitles.filter { hasBrowserMediaBadge($0) }
 
-        // Check active window titles first, then background tabs with a live media badge,
-        // then remaining background tabs (only when mic is active so a stale silent tab
-        // cannot trigger while YouTube plays).
-        let activeCandidates = app.windowTitles.map { (raw: $0, isActiveWindow: true) }
-        let badgedTabs = app.tabTitles
-            .filter { hasBrowserMediaBadge($0) }
-            .map { (raw: $0, isActiveWindow: false) }
-        let otherTabs = app.tabTitles
-            .filter { !hasBrowserMediaBadge($0) }
-            .map { (raw: $0, isActiveWindow: false) }
-
-        for candidate in activeCandidates + badgedTabs + otherTabs {
-            let tabHasMediaBadge = hasBrowserMediaBadge(candidate.raw)
-            if !mic && !candidate.isActiveWindow && !tabHasMediaBadge { continue }
-            let cleaned = cleanBrowserTitle(candidate.raw)
-            if let match = matchWebService(cleaned, micActive: mic) {
-                return match
+        // Muted in Google Meet: the browser releases the microphone while the call
+        // keeps playing, so a front Meet tab or a Meet tab with a live audio badge counts.
+        guard app.hasMic else {
+            guard app.hasOutput else { return nil }
+            let meet = (app.windowTitles + badgedTabs).lazy
+                .compactMap { matchGoogleMeet(cleanBrowserTitle($0)) }
+                .first
+            return meet.map {
+                DetectedMeeting(id: $0.id, source: $0.source, title: $0.title,
+                                isGenericTitle: $0.isGenericTitle, highConfidence: false)
             }
+        }
+
+        // Front tabs first, then tabs with a media badge, then the rest.
+        let otherTabs = app.tabTitles.filter { !hasBrowserMediaBadge($0) }
+        for raw in app.windowTitles + badgedTabs + otherTabs {
+            if let match = matchWebService(cleanBrowserTitle(raw)) { return match }
         }
 
         // Universal fallback: two-way audio (both mic AND output) in a browser catches
         // every other WebRTC meeting tool (Cal.com, LiveKit, custom corporate calls, etc.).
-        if app.hasMic && app.hasOutput {
+        if app.hasOutput {
             let preferred = app.tabTitles.first(where: { hasBrowserMediaBadge($0) })
                 ?? app.windowTitles.first
             if let raw = preferred {
@@ -418,11 +327,8 @@ enum MeetingMatcher {
         return nil
     }
 
-    static func matchWebService(_ title: String, micActive: Bool) -> DetectedMeeting? {
-        guard !title.isEmpty else { return nil }
-        let lower = title.lowercased()
-
-        // Google Meet: "Meet – Weekly Sync", "Meet - abc-defg-hij", "Google Meet – Standup"
+    /// Google Meet: "Meet – Weekly Sync", "Meet - abc-defg-hij", "Google Meet – Standup"
+    static func matchGoogleMeet(_ title: String) -> DetectedMeeting? {
         for prefix in ["Meet – ", "Meet - ", "Meet — ", "Google Meet – ", "Google Meet - ", "Google Meet — "] {
             if let range = title.range(of: prefix, options: [.anchored, .caseInsensitive]) {
                 let rest = String(title[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -433,10 +339,19 @@ enum MeetingMatcher {
                     source: "Google Meet",
                     title: isCode ? "Google Meet" : rest,
                     isGenericTitle: isCode,
-                    highConfidence: micActive
+                    highConfidence: true
                 )
             }
         }
+        return nil
+    }
+
+    /// Matches a cleaned browser tab title of a tab whose browser is using the microphone.
+    static func matchWebService(_ title: String) -> DetectedMeeting? {
+        guard !title.isEmpty else { return nil }
+        let lower = title.lowercased()
+
+        if let meet = matchGoogleMeet(title) { return meet }
 
         // Microsoft Teams Web
         if let base = stripSuffix(title, suffixes: [" | Microsoft Teams", " - Microsoft Teams"]) {
@@ -447,7 +362,7 @@ enum MeetingMatcher {
                     source: "Microsoft Teams",
                     title: base,
                     isGenericTitle: false,
-                    highConfidence: micActive
+                    highConfidence: true
                 )
             }
         }
@@ -459,12 +374,12 @@ enum MeetingMatcher {
                 source: "Zoom",
                 title: lower == "zoom webinar" ? "Zoom Webinar" : "Zoom Meeting",
                 isGenericTitle: true,
-                highConfidence: micActive
+                highConfidence: true
             )
         }
         if let base = stripSuffix(title, suffixes: [" - Zoom", " | Zoom"]) {
             let ignored = ["sign in", "my account", "download center", "plans & pricing", "meetings", "join a meeting", "zoom"]
-            if !base.isEmpty && !ignored.contains(where: { base.lowercased().contains($0) }) && micActive {
+            if !base.isEmpty && !ignored.contains(where: { base.lowercased().contains($0) }) {
                 return DetectedMeeting(
                     id: "zoom-web:\(base.lowercased())",
                     source: "Zoom",
@@ -484,7 +399,7 @@ enum MeetingMatcher {
                 source: "Slack Huddle",
                 title: name,
                 isGenericTitle: cleaned.isEmpty,
-                highConfidence: micActive
+                highConfidence: true
             )
         }
 
@@ -497,7 +412,7 @@ enum MeetingMatcher {
                     source: "Whereby",
                     title: base,
                     isGenericTitle: false,
-                    highConfidence: micActive
+                    highConfidence: true
                 )
             }
         }
@@ -511,12 +426,9 @@ enum MeetingMatcher {
                 source: "Jitsi Meet",
                 title: name,
                 isGenericTitle: name == "Jitsi Meet",
-                highConfidence: micActive
+                highConfidence: true
             )
         }
-
-        // Mic-confirmed web meeting platforms (prevents matching docs/marketing pages).
-        guard micActive else { return nil }
 
         // Standalone Google Meet PWA or PiP window while mic is live.
         if lower == "google meet" || lower == "meet" {
@@ -701,12 +613,12 @@ enum MeetingMatcher {
 // MARK: - Debounce, dismissal and lifecycle state machine
 
 struct MeetingTracker: Sendable {
+    static let forgetDismissAfterMisses = 15
     private(set) var active: DetectedMeeting?
     private var pending: DetectedMeeting?
     private var confirmCount = 0
     private var missCount = 0
     private var dismissedInCurrentCall = false
-    private var dismissedIDs: Set<String> = []
 
     enum Event: Equatable, Sendable {
         case none
@@ -715,50 +627,31 @@ struct MeetingTracker: Sendable {
         case hide
     }
 
-    /// Feed one poll result. `suppressed` is true while Transcriptor is already recording.
-    mutating func step(detected: DetectedMeeting?, suppressed: Bool) -> Event {
-        if suppressed {
-            if let detected { dismissedIDs.insert(detected.id) }
-            if active != nil {
-                active = nil
-                pending = nil
-                confirmCount = 0
-                missCount = 0
-                dismissedInCurrentCall = true
-                return .hide
-            }
-            dismissedInCurrentCall = detected != nil
-            return .none
-        }
-
+    /// Feed one poll result.
+    mutating func step(detected: DetectedMeeting?) -> Event {
         guard let detected else {
             pending = nil
             confirmCount = 0
             guard active != nil || dismissedInCurrentCall else { return .none }
             missCount += 1
-            // 3 consecutive misses (~6s) means the meeting genuinely ended.
-            guard missCount >= 3 else { return .none }
+            // A visible banner hides after ~6 s without the meeting; a closed one may only
+            // come back after ~30 s, so a short silence or another tab does not bring it back.
+            guard missCount >= (active != nil ? 3 : Self.forgetDismissAfterMisses) else { return .none }
             let wasVisible = active != nil
             active = nil
             dismissedInCurrentCall = false
-            dismissedIDs.removeAll()
             missCount = 0
             return wasVisible ? .hide : .none
         }
 
         missCount = 0
-
-        // Already dismissed for this continuous call or specific meeting ID.
-        if dismissedInCurrentCall || dismissedIDs.contains(detected.id) {
-            return .none
-        }
+        if dismissedInCurrentCall { return .none }
 
         if let current = active {
-            if current != detected {
-                active = detected
-                return .update(detected)
-            }
-            return .none
+            // A guess never replaces a sure title (e.g. switching away from the Meet tab).
+            guard current != detected, detected.highConfidence || !current.highConfidence else { return .none }
+            active = detected
+            return .update(detected)
         }
 
         // Confirm high-confidence detections immediately; lower-confidence require 2 consecutive polls.
@@ -777,11 +670,13 @@ struct MeetingTracker: Sendable {
         return .show(detected)
     }
 
+    /// Silences the current call until it ends: after the user closes the banner,
+    /// and on every poll while Transcriptor records.
     mutating func dismiss() {
-        if let active { dismissedIDs.insert(active.id) }
         active = nil
         pending = nil
         confirmCount = 0
+        missCount = 0
         dismissedInCurrentCall = true
     }
 }
@@ -804,9 +699,8 @@ final class MeetingDetector {
             // Short initial settle so launch stays instant.
             try? await Task.sleep(for: .seconds(1))
             while !Task.isCancelled {
-                let snapshot = await SystemProbe.capture()
-                guard !Task.isCancelled, let self else { break }
-                self.consume(snapshot)
+                guard let self else { return }
+                await self.poll()
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -826,16 +720,19 @@ final class MeetingDetector {
         onHide?()
     }
 
-    /// Call immediately when Transcriptor begins a meeting or dictation.
+    /// Call immediately when Transcriptor begins a meeting; the call it records stays silent.
     func suppressNow() {
-        if tracker.step(detected: tracker.active, suppressed: true) == .hide {
-            onHide?()
-        }
+        let wasVisible = tracker.active != nil
+        tracker.dismiss()
+        if wasVisible { onHide?() }
     }
 
-    private func consume(_ snapshot: SystemSnapshot) {
-        let detected = MeetingMatcher.detect(in: snapshot)
-        switch tracker.step(detected: detected, suppressed: isSuppressed()) {
+    private func poll() async {
+        if isSuppressed() { return suppressNow() }
+        let snapshot = await SystemProbe.capture()
+        guard !Task.isCancelled else { return }
+        if isSuppressed() { return suppressNow() }
+        switch tracker.step(detected: MeetingMatcher.detect(in: snapshot)) {
         case .none: break
         case .show(let meeting): onShow?(meeting)
         case .update(let meeting): onUpdate?(meeting)
@@ -859,7 +756,6 @@ private enum SystemProbe {
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         return NSWorkspace.shared.runningApplications.compactMap { app in
             guard let bundleID = app.bundleIdentifier, !bundleID.isEmpty else { return nil }
-            guard bundleID != "com.transcriptor.app" else { return nil }
             let isRelevant = MeetingMatcher.isBrowserBundleID(bundleID)
                 || MeetingMatcher.nativeCallBundleIDs.contains(bundleID)
             guard isRelevant else { return nil }
@@ -879,36 +775,26 @@ private enum SystemProbe {
 
     @concurrent
     private static func probeOffMain(metas: [AppMeta]) async -> SystemSnapshot {
+        // Which process uses the microphone is only known from macOS 14.2 on.
+        guard #available(macOS 14.2, *) else { return SystemSnapshot(apps: []) }
         let selfPID = ProcessInfo.processInfo.processIdentifier
         let pidToBundle = Dictionary(uniqueKeysWithValues: metas.map { ($0.pid, $0.bundleID) })
         let runningBundles = Set(metas.map(\.bundleID))
 
         var inputBundles: Set<String> = []
         var outputBundles: Set<String> = []
-        let supportsPerProcess: Bool
-        let globalMic: Bool
-
-        if #available(macOS 14.2, *) {
-            supportsPerProcess = true
-            globalMic = false
-            for proc in coreAudioProcesses() where proc.pid != selfPID {
-                guard proc.isRunningInput || proc.isRunningOutput else { continue }
-                let owner = resolveOwnerBundle(pid: proc.pid, bundleID: proc.bundleID,
-                                               pidToBundle: pidToBundle, runningBundles: runningBundles)
-                guard let owner else { continue }
-                if proc.isRunningInput { inputBundles.insert(owner) }
-                if proc.isRunningOutput { outputBundles.insert(owner) }
-            }
-        } else {
-            supportsPerProcess = false
-            globalMic = defaultInputRunning()
+        for proc in coreAudioProcesses() where proc.pid != selfPID {
+            let owner = resolveOwnerBundle(pid: proc.pid, bundleID: proc.bundleID,
+                                           pidToBundle: pidToBundle, runningBundles: runningBundles)
+            guard let owner else { continue }
+            if proc.isRunningInput { inputBundles.insert(owner) }
+            if proc.isRunningOutput { outputBundles.insert(owner) }
         }
 
-        // Fast path: when no relevant app has active audio (and no macOS 13 global mic),
-        // skip Accessibility completely so idle CPU usage stays near zero.
-        let activeBundles = inputBundles.union(outputBundles)
-        if supportsPerProcess && activeBundles.isEmpty {
-            return SystemSnapshot(apps: [], globalMicActive: false, supportsPerProcessAudio: true)
+        // Fast path: when no relevant app has active audio, skip Accessibility
+        // completely so idle CPU usage stays near zero.
+        if inputBundles.isEmpty && outputBundles.isEmpty {
+            return SystemSnapshot(apps: [])
         }
 
         let axTrusted = AXIsProcessTrusted()
@@ -921,19 +807,14 @@ private enum SystemProbe {
             let hasMic = inputBundles.contains(meta.bundleID)
             let hasOutput = outputBundles.contains(meta.bundleID)
             let needsFaceTimeTitle = meta.bundleID == "com.apple.FaceTime" && faceTimeDaemonActive
-            let needsWindows = hasMic || hasOutput || needsFaceTimeTitle || (!supportsPerProcess && globalMic)
-            guard needsWindows else { continue }
+            guard hasMic || hasOutput || needsFaceTimeTitle else { continue }
 
             var windows: [String] = []
             var tabs: [String] = []
             if axTrusted {
-                let isBrowser = MeetingMatcher.isBrowserBundleID(meta.bundleID)
-                let ax = inspectAX(pid: meta.pid, includeTabs: isBrowser)
-                windows = ax.windows
-                tabs = ax.tabs
-            }
-            if windows.isEmpty {
-                windows = cgWindowTitles(for: meta.pid)
+                // Tab titles only matter while the browser holds the microphone.
+                let includeTabs = MeetingMatcher.isBrowserBundleID(meta.bundleID) && hasMic
+                (windows, tabs) = inspectAX(pid: meta.pid, includeTabs: includeTabs)
             }
             snapshots.append(AppSnapshot(
                 bundleID: meta.bundleID,
@@ -953,7 +834,7 @@ private enum SystemProbe {
             }
         }
 
-        return SystemSnapshot(apps: snapshots, globalMicActive: globalMic, supportsPerProcessAudio: supportsPerProcess)
+        return SystemSnapshot(apps: snapshots)
     }
 
     // MARK: CoreAudio
@@ -1014,17 +895,6 @@ private enum SystemProbe {
                                               mScope: kAudioObjectPropertyScopeGlobal,
                                               mElement: kAudioObjectPropertyElementMain)
         return AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr && value != 0
-    }
-
-    private static func defaultInputRunning() -> Bool {
-        var device = AudioDeviceID(kAudioObjectUnknown)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
-                                              mScope: kAudioObjectPropertyScopeGlobal,
-                                              mElement: kAudioObjectPropertyElementMain)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &device) == noErr,
-              device != kAudioObjectUnknown else { return false }
-        return audioFlag(device, selector: kAudioDevicePropertyDeviceIsRunningSomewhere)
     }
 
     /// Maps helper processes (e.g. `com.google.Chrome.helper`, `com.apple.WebKit.GPU`,
@@ -1135,17 +1005,5 @@ private enum SystemProbe {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
         return value as? T
-    }
-
-    private static func cgWindowTitles(for pid: pid_t) -> [String] {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return []
-        }
-        return list.compactMap { entry in
-            guard (entry[kCGWindowOwnerPID as String] as? Int32) == pid else { return nil }
-            guard (entry[kCGWindowLayer as String] as? Int) == 0 else { return nil }
-            guard let name = entry[kCGWindowName as String] as? String, !name.isEmpty else { return nil }
-            return name
-        }
     }
 }
