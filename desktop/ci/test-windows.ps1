@@ -69,9 +69,10 @@ function End-To-End([bool]$Dictation, [string]$Expect) {
     [Native.Keys]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
     [Native.Keys]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 500
-    if ((Foreground) -ne "Target") { throw "the meeting banner took the keyboard: '$(Foreground)' is in front" }
+    $bannerFront = Foreground
     Set-Content (Join-Path $dir "selftest-banner-clicked") "clicked"
     Start-Sleep -Seconds 1
+    Write-Host "in front after the banner click: '$bannerFront', then '$(Foreground)'"
 
     Press-Hotkey
     Start-Sleep -Milliseconds 500
@@ -94,6 +95,7 @@ function End-To-End([bool]$Dictation, [string]$Expect) {
         Write-Host "clipboard: $(Get-Clipboard)   in front: $(Foreground)"
     }
     Stop-Process -Id $target.Id -Force
+    if ($bannerFront -ne "Target") { throw "the meeting banner took the keyboard: '$bannerFront' was in front" }
     if ($app.ExitCode -ne 0) { throw "end-to-end self-test failed" }
     if ($text -notmatch $Expect) { throw "the text did not arrive in the other app" }
     Write-Host "ok   hotkey -> pill -> paste into another app"

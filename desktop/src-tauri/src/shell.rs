@@ -17,6 +17,9 @@ const BANNER_HEIGHT: f64 = 96.0;
 
 static PLATFORM: OnceLock<Value> = OnceLock::new();
 static BANNER_GEN: AtomicU64 = AtomicU64::new(0);
+/// The window that had the keyboard when the meeting banner appeared (Windows).
+#[cfg(target_os = "windows")]
+static BANNER_PREVIOUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 /// What the meeting banner shows, for a banner page that loads after the event was sent.
 static BANNER: Mutex<Option<Value>> = Mutex::new(None);
 
@@ -205,13 +208,32 @@ pub fn show_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect:
     #[cfg(target_os = "windows")]
     if let Ok(hwnd) = banner.hwnd() {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, ShowWindow, SW_SHOWNOACTIVATE};
         unsafe {
+            let previous = GetForegroundWindow();
+            if previous.0 as isize != hwnd.0 as isize {
+                BANNER_PREVIOUS.store(previous.0 as isize, Ordering::SeqCst);
+            }
             let _ = ShowWindow(HWND(hwnd.0 as _), SW_SHOWNOACTIVATE);
         }
         return;
     }
     let _ = banner.show();
+}
+
+/// A click on the banner activates it on Windows; the keyboard goes back to the
+/// window that had it, so typing in the call goes on.
+#[cfg(target_os = "windows")]
+fn give_keyboard_back(banner: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
+    let Ok(hwnd) = banner.hwnd() else { return };
+    let previous = BANNER_PREVIOUS.swap(0, Ordering::SeqCst);
+    unsafe {
+        if previous != 0 && GetForegroundWindow().0 as isize == hwnd.0 as isize {
+            let _ = SetForegroundWindow(HWND(previous as _));
+        }
+    }
 }
 
 pub fn update_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect::DetectedMeeting) {
@@ -237,6 +259,8 @@ pub fn hide_meeting_banner(handle: &AppHandle) {
         tokio::time::sleep(std::time::Duration::from_millis(180)).await;
         if BANNER_GEN.load(Ordering::SeqCst) == gen {
             if let Some(banner) = handle.get_webview_window("meeting-banner") {
+                #[cfg(target_os = "windows")]
+                give_keyboard_back(&banner);
                 let _ = banner.hide();
             }
         }
