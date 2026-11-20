@@ -182,7 +182,8 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
     tokio::time::sleep(Duration::from_millis(600)).await;
     let visible = tauri::Manager::get_webview_window(&app.handle, "pill").is_some_and(|w| w.is_visible().unwrap_or(false));
     shell::hide_pill(&app.handle);
-    report.check("pill window", visible, "shown and hidden");
+    let hidden = tauri::Manager::get_webview_window(&app.handle, "pill").is_some_and(|w| !w.is_visible().unwrap_or(true));
+    report.check("pill window", visible && hidden, format!("shown {visible}, hidden {hidden}"));
 
     shell::show_meeting_banner(&app.handle, &sample_meeting());
     tokio::time::sleep(Duration::from_millis(400)).await;
@@ -190,7 +191,9 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
         tauri::Manager::get_webview_window(&app.handle, "meeting-banner").is_some_and(|w| w.is_visible().unwrap_or(false));
     shell::hide_meeting_banner(&app.handle);
     tokio::time::sleep(Duration::from_millis(250)).await;
-    report.check("meeting banner window", banner_visible, "shown and hidden");
+    let banner_hidden =
+        tauri::Manager::get_webview_window(&app.handle, "meeting-banner").is_some_and(|w| !w.is_visible().unwrap_or(true));
+    report.check("meeting banner window", banner_visible && banner_hidden, format!("shown {banner_visible}, hidden {banner_hidden}"));
 
     if cfg!(target_os = "macos") {
         report.note("clipboard", "left alone on the development Mac");

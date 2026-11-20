@@ -167,8 +167,23 @@ pub fn show_pill(handle: &AppHandle) {
 
 pub fn hide_pill(handle: &AppHandle) {
     if let Some(pill) = handle.get_webview_window("pill") {
-        let _ = pill.hide();
+        hide_overlay(&pill);
     }
+}
+
+/// On Windows the overlays appear through ShowWindow(SW_SHOWNOACTIVATE), so tao
+/// never marked them visible and its hide() would leave them on screen.
+fn hide_overlay(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+        unsafe {
+            let _ = ShowWindow(HWND(hwnd.0 as _), SW_HIDE);
+        }
+        return;
+    }
+    let _ = window.hide();
 }
 
 /// Anchors the detected-meeting pill next to the system tray (bottom-right above
@@ -261,7 +276,7 @@ pub fn hide_meeting_banner(handle: &AppHandle) {
             if let Some(banner) = handle.get_webview_window("meeting-banner") {
                 #[cfg(target_os = "windows")]
                 give_keyboard_back(&banner);
-                let _ = banner.hide();
+                hide_overlay(&banner);
             }
         }
     });
