@@ -107,11 +107,15 @@ pub fn create_windows(handle: &AppHandle) -> tauri::Result<()> {
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
-        .focusable(false)
         .visible_on_all_workspaces(true)
         .visible(false);
     #[cfg(not(target_os = "macos"))]
     let banner = banner.transparent(true);
+    // GTK hands focus back to a focusable window on its first draw. On Windows a
+    // window that cannot be focused gets no clicks in its web view, so it stays
+    // focusable there and only appears without activation.
+    #[cfg(target_os = "linux")]
+    let banner = banner.focusable(false);
     let _banner = banner.build()?;
     #[cfg(target_os = "linux")]
     crate::linux::keep_unfocused(&_banner);
