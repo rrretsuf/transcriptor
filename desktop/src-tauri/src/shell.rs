@@ -1,6 +1,6 @@
 use crate::app::{App, Phase};
-use crate::meeting;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -12,8 +12,11 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWi
 
 const PILL_WIDTH: f64 = 520.0;
 const PILL_HEIGHT: f64 = 84.0;
+const BANNER_WIDTH: f64 = 420.0;
+const BANNER_HEIGHT: f64 = 96.0;
 
 static PLATFORM: OnceLock<Value> = OnceLock::new();
+static BANNER_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// What the web views need to look native: the system, its accent colour and
 /// whether Mica is behind the window.
@@ -92,6 +95,23 @@ pub fn create_windows(handle: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
     crate::linux::keep_unfocused(&pill);
     let _ = pill.set_ignore_cursor_events(true);
+
+    let banner = WebviewWindowBuilder::new(handle, "meeting-banner", WebviewUrl::App("meeting-banner.html".into()))
+        .title("Transcriptor")
+        .inner_size(BANNER_WIDTH, BANNER_HEIGHT)
+        .decorations(false)
+        .resizable(false)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible_on_all_workspaces(true)
+        .visible(false);
+    #[cfg(not(target_os = "macos"))]
+    let banner = banner.transparent(true);
+    let _banner = banner.build()?;
+    #[cfg(target_os = "linux")]
+    crate::linux::keep_unfocused(&_banner);
     Ok(())
 }
 
@@ -139,6 +159,74 @@ pub fn hide_pill(handle: &AppHandle) {
     if let Some(pill) = handle.get_webview_window("pill") {
         let _ = pill.hide();
     }
+}
+
+/// Anchors the detected-meeting pill next to the system tray (bottom-right above
+/// the taskbar on Windows, top-right below the top bar on Linux) without taking focus.
+pub fn show_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect::DetectedMeeting) {
+    let Some(banner) = handle.get_webview_window("meeting-banner") else { return };
+    BANNER_GEN.fetch_add(1, Ordering::SeqCst);
+    let mut edge = "top";
+    if let Some(monitor) = handle.primary_monitor().ok().flatten() {
+        let area = monitor.work_area();
+        let full_pos = monitor.position();
+        let full_size = monitor.size();
+        let scale = monitor.scale_factor();
+        let w = (BANNER_WIDTH * scale).round() as i32;
+        let h = (BANNER_HEIGHT * scale).round() as i32;
+        let inset = (4.0 * scale).round() as i32;
+        let x = (area.position.x + area.size.width as i32 - w).max(area.position.x);
+
+        let taskbar_at_bottom = cfg!(target_os = "windows")
+            && (area.position.y + area.size.height as i32) <= (full_pos.y + full_size.height as i32);
+        let y = if taskbar_at_bottom {
+            edge = "bottom";
+            area.position.y + area.size.height as i32 - h - inset
+        } else {
+            area.position.y + inset
+        };
+        let _ = banner.set_position(PhysicalPosition::new(x, y));
+    }
+
+    let dark = platform().get("dark").and_then(Value::as_bool);
+    let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({
+        "state": "show",
+        "meeting": detected,
+        "edge": edge,
+        "dark": dark,
+    }));
+
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = banner.hwnd() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+        unsafe {
+            let _ = ShowWindow(HWND(hwnd.0 as _), SW_SHOWNOACTIVATE);
+        }
+        return;
+    }
+    let _ = banner.show();
+}
+
+pub fn update_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect::DetectedMeeting) {
+    let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({
+        "state": "update",
+        "meeting": detected,
+    }));
+}
+
+pub fn hide_meeting_banner(handle: &AppHandle) {
+    let gen = BANNER_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({ "state": "hide" }));
+    let handle = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+        if BANNER_GEN.load(Ordering::SeqCst) == gen {
+            if let Some(banner) = handle.get_webview_window("meeting-banner") {
+                let _ = banner.hide();
+            }
+        }
+    });
 }
 
 /* ---------------------------------- tray ---------------------------------- */
@@ -220,10 +308,10 @@ pub fn create_tray(app: &Arc<App>) -> tauri::Result<()> {
                 "file" => show_main(app, "file"),
                 "meeting" => {
                     if !app.meeting.lock().unwrap().is_active() {
-                        meeting::reset(app);
-                        meeting::start(app);
+                        crate::meeting_detect::start_detected_meeting(app);
+                    } else {
+                        show_main(app, "meeting");
                     }
-                    show_main(app, "meeting");
                 }
                 "history" => show_main(app, "history"),
                 "settings" => show_main(app, "settings"),

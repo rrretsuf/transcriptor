@@ -136,12 +136,14 @@ The menu bar icon animates while recording; its menu holds
   API returns the transcript, ready to copy, with "Speaker N:" labels once a
   second voice is heard. Your context terms go along. Video is reduced to its audio
   track before upload, and the file is deleted from Soniox afterwards.
-- **Meeting** — records your microphone plus everything the Mac plays (the other
-  side of a Meet or Zoom call), with or without headphones. Each change of voice
-  starts a "Speaker N:" paragraph. Pause, continue, end; the full transcript is
-  ready to copy. The first meeting asks for the
+- **Meeting** — automatically detects when a call starts (Google Meet, Zoom,
+  Teams, Slack Huddles, FaceTime, Discord, Webex, and other native or web apps)
+  and offers a one-click pill with the meeting title prefilled. Records your
+  microphone plus everything the computer plays, with or without headphones. Each
+  change of voice starts a "Speaker N:" paragraph. Pause, continue, end; the full
+  transcript is ready to copy. On macOS, the first meeting asks for the
   **System Audio Recording** permission (**Screen Recording** before macOS 14.2);
-  without it the meeting uses the microphone only.
+  without it the meeting uses the microphone only. Can be toggled in Settings › General.
 
 Both save their transcripts to **All Transcriptions**. Meetings and files are kept
 for good; the oldest dictations fall off after 5,000.

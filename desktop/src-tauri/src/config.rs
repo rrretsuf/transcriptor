@@ -9,6 +9,7 @@ pub struct Config {
     pub auto_paste: bool,
     pub context: String,
     pub cursor_context: bool,
+    pub detect_meetings: bool,
     pub hotkey: String,
     pub language_hints: Vec<String>,
     pub launch_at_login: bool,
@@ -33,6 +34,7 @@ impl Default for Config {
             auto_paste: true,
             context: String::new(),
             cursor_context: true,
+            detect_meetings: true,
             hotkey: DEFAULT_HOTKEY.into(),
             language_hints: vec!["en".into()],
             launch_at_login: true,
@@ -81,6 +83,7 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.model, "stt-rt-v6");
         assert_eq!(config.language_hints, ["en"]);
+        assert!(config.detect_meetings);
         assert!(!config.onboarded);
     }
 

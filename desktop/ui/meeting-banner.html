@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Transcriptor</title>
+<link rel="stylesheet" href="meeting-banner.css">
+</head>
+<body>
+<div id="pill" class="hidden" role="dialog" aria-label="Meeting detected">
+  <div class="info">
+    <div id="title" class="title"></div>
+    <div class="subtitle"><i class="live-dot" aria-hidden="true"></i><span id="source"></span></div>
+  </div>
+  <div class="actions">
+    <button id="start" class="transcribe" type="button"><i class="rec-dot" aria-hidden="true"></i><span>Transcribe</span></button>
+    <button id="dismiss" class="dismiss" type="button" aria-label="Dismiss" title="Dismiss">
+      <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+    </button>
+  </div>
+</div>
+<script type="module" src="meeting-banner.js"></script>
+</body>
+</html>

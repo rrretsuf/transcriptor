@@ -57,7 +57,10 @@ private struct TrayLabel: View {
 
     var body: some View {
         Image(nsImage: Self.trayImage(active: state.state != .idle || state.meeting.status == .recording))
-            .background { if #available(macOS 14, *) { SettingsLender(state: state) } }
+            .background {
+                TrayAnchor(state: state)
+                if #available(macOS 14, *) { SettingsLender(state: state) }
+            }
             .onAppear { state.openWindow = { openWindow(id: $0) } }
     }
 
@@ -98,6 +101,10 @@ private struct MenuContent: View {
         Button("Transcribe File…") { open("file") }
         Button(state.meeting.isActive ? "Show Meeting" : "Start Meeting Transcription") {
             if !state.meeting.isActive {
+                if let detected = state.detectedMeeting {
+                    state.startDetectedMeeting(detected)
+                    return
+                }
                 state.meeting.reset()
                 state.meeting.start()
             }
@@ -125,6 +132,23 @@ private struct MenuContent: View {
         case .idle: "Start Dictation"
         }
     }
+}
+
+// Captures the menu bar button's screen rect so the meeting banner drops right beneath it.
+private struct TrayAnchor: NSViewRepresentable {
+    let state: AppState
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        state.statusItemFrame = { [weak view] in
+            guard let view, let window = view.window else { return nil }
+            let inWindow = view.convert(view.bounds, to: nil)
+            return window.convertToScreen(inWindow)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 // macOS 14 killed the showSettingsWindow: selector that macOS 13 still answers.
@@ -167,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Paint the island once (invisible, inside the notch) so the first session is instant.
         appState.surface.install()
         appState.surface.onMinimize = { [appState] in appState.setNotchMinimized($0) }
+        appState.applyMeetingDetection()
         // Warm mic, key and TLS shortly after launch so the first hotkey is as fast as the tenth.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [appState] in
             appState.prepare()

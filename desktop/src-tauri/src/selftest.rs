@@ -184,6 +184,21 @@ async fn checks(app: &Arc<App>, report: &mut Report) {
     shell::hide_pill(&app.handle);
     report.check("pill window", visible, "shown and hidden");
 
+    let sample = crate::meeting_detect::DetectedMeeting {
+        id: "google-meet:selftest".into(),
+        source: "Google Meet".into(),
+        title: "Design Review".into(),
+        is_generic_title: false,
+        high_confidence: true,
+    };
+    shell::show_meeting_banner(&app.handle, &sample);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let banner_visible =
+        tauri::Manager::get_webview_window(&app.handle, "meeting-banner").is_some_and(|w| w.is_visible().unwrap_or(false));
+    shell::hide_meeting_banner(&app.handle);
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    report.check("meeting banner window", banner_visible, "shown and hidden");
+
     if cfg!(target_os = "macos") {
         report.note("clipboard", "left alone on the development Mac");
     } else {

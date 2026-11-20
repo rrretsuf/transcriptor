@@ -33,8 +33,12 @@ final class Meeting: ObservableObject {
         elapsedBefore + (segmentStart.map { now.timeIntervalSince($0) } ?? 0)
     }
 
-    func start() {
+    func start(title initialTitle: String? = nil) {
         guard !isActive else { return }
+        if let initialTitle {
+            let trimmed = initialTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { title = trimmed }
+        }
         text = ""
         live = ""
         problem = nil

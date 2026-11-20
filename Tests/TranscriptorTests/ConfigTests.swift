@@ -20,6 +20,7 @@ struct ConfigTests {
         #expect(config.model == "stt-rt-v6")
         #expect(config.languageHints == ["en"])
         #expect(config.cursorContext == true)
+        #expect(config.detectMeetings == true)
     }
 
     @Test func termsSplitOnCommasAndLines() {

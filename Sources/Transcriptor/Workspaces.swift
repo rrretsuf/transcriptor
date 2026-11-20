@@ -144,7 +144,7 @@ struct MeetingView: View {
                 Text("Your microphone and everything the Mac plays, with or without headphones.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-                Button("Start Recording", systemImage: "record.circle", action: meeting.start)
+                Button("Start Recording", systemImage: "record.circle") { meeting.start() }
                     .glassButton(prominent: true)
                     .tint(.red)
                     .controlSize(.large)

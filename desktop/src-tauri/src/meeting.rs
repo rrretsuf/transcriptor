@@ -116,12 +116,19 @@ fn changed(app: &Arc<App>) {
 }
 
 pub fn start(app: &Arc<App>) {
+    start_with_title(app, None);
+}
+
+pub fn start_with_title(app: &Arc<App>, initial_title: Option<String>) {
     {
         let mut meeting = app.meeting.lock().unwrap();
         if meeting.is_active() {
             return;
         }
-        let title = std::mem::take(&mut meeting.title);
+        let title = initial_title
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| std::mem::take(&mut meeting.title));
         let last_id = meeting.last_id;
         *meeting = Meeting { title, last_id, started_at: Some(now_ms()), ..Meeting::default() };
     }

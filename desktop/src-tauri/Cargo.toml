@@ -1,6 +1,6 @@
 [package]
 name = "transcriptor"
-version = "3.0.2"
+version = "3.1.0"
 description = "Press a hotkey, speak, and the text lands at your cursor."
 edition = "2021"
 publish = false
@@ -31,11 +31,12 @@ uuid = { version = "1", features = ["v4"] }
 keyring = "4"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "UI_ViewManagement"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "UI_ViewManagement"] }
 windows-version = "0.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 enigo = { version = "0.6", default-features = false, features = ["x11rb"] }
+x11rb = "0.13"
 ashpd = { version = "0.14", default-features = false, features = ["tokio", "global_shortcuts", "remote_desktop", "screencast", "settings"] }
 gtk = "0.18"
 

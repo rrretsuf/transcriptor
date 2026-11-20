@@ -5197,7 +5197,7 @@ dependencies = [
 
 [[package]]
 name = "transcriptor"
-version = "3.0.2"
+version = "3.1.0"
 dependencies = [
  "arboard",
  "ashpd",
@@ -5223,6 +5223,7 @@ dependencies = [
  "uuid",
  "windows 0.61.3",
  "windows-version",
+ "x11rb",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ mod keystore;
 #[cfg(target_os = "linux")]
 mod linux;
 mod meeting;
+mod meeting_detect;
 mod paste;
 mod selftest;
 mod shell;
@@ -78,6 +79,9 @@ fn save_config(app: AppState, config: Config) -> Result<(), String> {
     if config.launch_at_login != previous.launch_at_login {
         apply_launch_at_login(&app);
     }
+    if config.detect_meetings != previous.detect_meetings {
+        meeting_detect::apply_enabled(&app);
+    }
     Ok(())
 }
 
@@ -136,6 +140,16 @@ fn meeting_do(app: AppState, action: String, title: Option<String>) {
         "title" => meeting::set_title(&app, title.unwrap_or_default()),
         _ => {}
     }
+}
+
+#[tauri::command]
+fn meeting_banner_start(app: AppState) {
+    meeting_detect::start_detected_meeting(&app);
+}
+
+#[tauri::command]
+fn meeting_banner_dismiss(app: AppState) {
+    meeting_detect::dismiss_banner(&app);
 }
 
 #[tauri::command]
@@ -282,6 +296,8 @@ fn main() {
             finish_onboarding,
             meeting_get,
             meeting_do,
+            meeting_banner_start,
+            meeting_banner_dismiss,
             file_get,
             file_start,
             file_reset
@@ -308,6 +324,7 @@ fn main() {
                 return Ok(());
             }
             apply_launch_at_login(&app);
+            meeting_detect::start_monitor(app.clone());
             let warm = app.clone();
             tauri::async_runtime::spawn(async move { drop(warm.api_key().await) });
             if toggle_on_launch {

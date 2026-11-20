@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
     static let cancelHotkey = "Option+X"
 
     @Published private(set) var state = Phase.idle
+    @Published private(set) var detectedMeeting: DetectedMeeting?
 
     let store = Store()
     let hotkeys = Hotkeys()
@@ -20,6 +21,8 @@ final class AppState: ObservableObject {
     let tapWatcher = TapWatcher()
     let files: FileTranscription
     let meeting: Meeting
+    let meetingDetector = MeetingDetector()
+    let meetingBanner = MeetingBanner()
     private let mic = MicCapture()
     private var session: Session?
     private var target: String?         // the app being dictated into, kept with the entry
@@ -34,8 +37,19 @@ final class AppState: ObservableObject {
         files = FileTranscription(store: store)
         meeting = Meeting(store: store)
         // Views read settings, history and the meeting's status through AppState.
-        forwards = [store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() },
-                    meeting.$status.sink { [weak self] _ in self?.objectWillChange.send() }]
+        forwards = [
+            store.objectWillChange.sink { [weak self] in self?.objectWillChange.send() },
+            meeting.$status.sink { [weak self] status in
+                guard let self else { return }
+                if status == .recording || status == .paused || status == .finishing {
+                    self.detectedMeeting = nil
+                    self.meetingDetector.suppressNow()
+                    self.meetingBanner.hide()
+                }
+                self.objectWillChange.send()
+            },
+        ]
+        wireMeetingDetection()
     }
 
     func forgetKey() { apiKey = nil }
@@ -43,6 +57,63 @@ final class AppState: ObservableObject {
     /// Lent by the tray label view; agent apps must activate before a window can come forward.
     var openSettings: (() -> Void)?
     var openWindow: ((String) -> Void)?
+    var statusItemFrame: (() -> NSRect?)? {
+        didSet { meetingBanner.anchorRect = statusItemFrame }
+    }
+
+    private func wireMeetingDetection() {
+        meetingDetector.isSuppressed = { [weak self] in
+            self?.meeting.isActive ?? false
+        }
+        meetingDetector.onShow = { [weak self] detected in
+            guard let self else { return }
+            self.detectedMeeting = detected
+            self.meetingBanner.show(detected)
+        }
+        meetingDetector.onUpdate = { [weak self] detected in
+            guard let self else { return }
+            self.detectedMeeting = detected
+            self.meetingBanner.update(detected)
+        }
+        meetingDetector.onHide = { [weak self] in
+            guard let self else { return }
+            self.detectedMeeting = nil
+            self.meetingBanner.hide()
+        }
+        meetingBanner.onStart = { [weak self] detected in
+            self?.startDetectedMeeting(detected)
+        }
+        meetingBanner.onDismiss = { [weak self] in
+            guard let self else { return }
+            self.detectedMeeting = nil
+            self.meetingDetector.dismissCurrent()
+        }
+    }
+
+    func applyMeetingDetection() {
+        if config.detectMeetings {
+            meetingBanner.install()
+            meetingDetector.start()
+        } else {
+            meetingDetector.stop()
+            detectedMeeting = nil
+            meetingBanner.hide()
+        }
+    }
+
+    /// Starts meeting transcription with the detected meeting's title pre-filled
+    /// (and still editable in the Meeting window).
+    func startDetectedMeeting(_ detected: DetectedMeeting) {
+        detectedMeeting = nil
+        meetingDetector.suppressNow()
+        meetingBanner.hide()
+        if !meeting.isActive {
+            meeting.reset()
+            meeting.start(title: detected.title)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow?("meeting")
+    }
 
     func showSettings() {
         NSApp.activate(ignoringOtherApps: true)

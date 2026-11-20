@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "What the app's own windows may ask the core to do.",
-  "windows": ["main", "pill"],
+  "windows": ["main", "pill", "meeting-banner"],
   "permissions": [
     "core:default",
     "dialog:allow-open",
