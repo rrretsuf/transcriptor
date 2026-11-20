@@ -1,7 +1,7 @@
 use crate::app::{App, Phase};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -17,6 +17,8 @@ const BANNER_HEIGHT: f64 = 96.0;
 
 static PLATFORM: OnceLock<Value> = OnceLock::new();
 static BANNER_GEN: AtomicU64 = AtomicU64::new(0);
+/// What the meeting banner shows, for a banner page that loads after the event was sent.
+static BANNER: Mutex<Option<Value>> = Mutex::new(None);
 
 /// What the web views need to look native: the system, its accent colour and
 /// whether Mica is behind the window.
@@ -187,12 +189,14 @@ pub fn show_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect:
     }
 
     let dark = platform().get("dark").and_then(Value::as_bool);
-    let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({
+    let payload = json!({
         "state": "show",
         "meeting": detected,
         "edge": edge,
         "dark": dark,
-    }));
+    });
+    *BANNER.lock().unwrap() = Some(payload.clone());
+    let _ = handle.emit_to("meeting-banner", "meeting-banner", payload);
 
     #[cfg(target_os = "windows")]
     if let Ok(hwnd) = banner.hwnd() {
@@ -207,14 +211,22 @@ pub fn show_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect:
 }
 
 pub fn update_meeting_banner(handle: &AppHandle, detected: &crate::meeting_detect::DetectedMeeting) {
+    if let Some(payload) = BANNER.lock().unwrap().as_mut() {
+        payload["meeting"] = json!(detected);
+    }
     let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({
         "state": "update",
         "meeting": detected,
     }));
 }
 
+pub fn current_meeting_banner() -> Option<Value> {
+    BANNER.lock().unwrap().clone()
+}
+
 pub fn hide_meeting_banner(handle: &AppHandle) {
     let gen = BANNER_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    *BANNER.lock().unwrap() = None;
     let _ = handle.emit_to("meeting-banner", "meeting-banner", json!({ "state": "hide" }));
     let handle = handle.clone();
     tauri::async_runtime::spawn(async move {

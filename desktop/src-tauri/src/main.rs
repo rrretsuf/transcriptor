@@ -148,6 +148,11 @@ fn meeting_banner_start(app: AppState) {
 }
 
 #[tauri::command]
+fn meeting_banner_current() -> Option<Value> {
+    shell::current_meeting_banner()
+}
+
+#[tauri::command]
 fn meeting_banner_dismiss(app: AppState) {
     meeting_detect::dismiss_banner(&app);
 }
@@ -298,6 +303,7 @@ fn main() {
             meeting_do,
             meeting_banner_start,
             meeting_banner_dismiss,
+            meeting_banner_current,
             file_get,
             file_start,
             file_reset

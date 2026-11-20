@@ -274,7 +274,7 @@ async fn meeting_banner_click(app: &Arc<App>, report: &mut Report) {
         return report.check("meeting banner click", false, "no banner window");
     };
     shell::show_meeting_banner(&app.handle, &sample_meeting());
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
     let (Ok(origin), Ok(scale)) = (banner.outer_position(), banner.scale_factor()) else {
         return report.check("meeting banner click", false, "banner position unknown");
     };

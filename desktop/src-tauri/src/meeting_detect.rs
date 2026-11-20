@@ -161,21 +161,22 @@ impl MeetingMatcher {
                 .then(a.process_name.cmp(&b.process_name))
         });
 
-        for app in ordered {
-            let proc_name = normalize_process_name(&app.process_name);
-            if proc_name == "transcriptor" {
-                continue;
-            }
-            if let Some(native) = Self::match_native(&proc_name, app) {
+        let apps: Vec<(String, &AppSnapshot)> = ordered
+            .into_iter()
+            .map(|app| (normalize_process_name(&app.process_name), app))
+            .filter(|(name, _)| name != "transcriptor")
+            .collect();
+        // A named meeting in any app beats a guess from the first browser.
+        for (name, app) in &apps {
+            if let Some(native) = Self::match_native(name, app) {
                 return Some(native);
             }
-            if let Some(browser) = browser_label(&proc_name) {
-                if let Some(web) = Self::match_browser(browser, app) {
-                    return Some(web);
-                }
+            if let Some(web) = browser_label(name).and_then(|_| Self::match_browser(app)) {
+                return Some(web);
             }
         }
-        None
+        apps.iter()
+            .find_map(|(name, app)| browser_label(name).and_then(|browser| Self::webrtc_fallback(browser, app)))
     }
 
     fn match_native(proc_name: &str, app: &AppSnapshot) -> Option<DetectedMeeting> {
@@ -359,7 +360,7 @@ impl MeetingMatcher {
         })
     }
 
-    fn match_browser(browser_name: &str, app: &AppSnapshot) -> Option<DetectedMeeting> {
+    fn match_browser(app: &AppSnapshot) -> Option<DetectedMeeting> {
         let titles: Vec<String> = app
             .window_titles
             .iter()
@@ -380,14 +381,20 @@ impl MeetingMatcher {
                 .map(|m| DetectedMeeting { high_confidence: false, ..m });
         }
 
-        if let Some(known) = titles.iter().find_map(|t| match_known_web_platform(t)) {
-            return Some(known);
-        }
+        titles.iter().find_map(|t| match_known_web_platform(t))
+    }
 
-        // Universal WebRTC fallback: the browser both records and plays.
-        if !app.has_output {
+    /// Universal WebRTC fallback: the browser both records and plays.
+    fn webrtc_fallback(browser_name: &str, app: &AppSnapshot) -> Option<DetectedMeeting> {
+        if !app.has_mic || !app.has_output {
             return None;
         }
+        let titles: Vec<String> = app
+            .window_titles
+            .iter()
+            .map(|t| clean_browser_title(t))
+            .filter(|t| !t.is_empty())
+            .collect();
         if titles.iter().any(|t| {
             let lower = t.to_lowercase();
             EXCLUDED_WEB_KEYWORDS.iter().any(|k| lower.contains(k))

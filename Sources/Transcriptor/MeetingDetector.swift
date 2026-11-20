@@ -112,11 +112,15 @@ enum MeetingMatcher {
             if a.hasMic != b.hasMic { return a.hasMic }
             return a.isFrontmost && !b.isFrontmost
         }
+        // A named meeting in any app beats a guess from the first browser.
         for app in ordered {
             if let native = matchNative(app) { return native }
             if isBrowserBundleID(app.bundleID), let web = matchBrowser(app) { return web }
         }
-        return nil
+        return ordered.lazy
+            .filter { isBrowserBundleID($0.bundleID) }
+            .compactMap { webRTCFallback($0) }
+            .first
     }
 
     // MARK: Native apps
@@ -305,10 +309,13 @@ enum MeetingMatcher {
         for raw in app.windowTitles + badgedTabs + otherTabs {
             if let match = matchWebService(cleanBrowserTitle(raw)) { return match }
         }
+        return nil
+    }
 
+    private static func webRTCFallback(_ app: AppSnapshot) -> DetectedMeeting? {
         // Universal fallback: two-way audio (both mic AND output) in a browser catches
         // every other WebRTC meeting tool (Cal.com, LiveKit, custom corporate calls, etc.).
-        if app.hasOutput {
+        if app.hasMic && app.hasOutput {
             let preferred = app.tabTitles.first(where: { hasBrowserMediaBadge($0) })
                 ?? app.windowTitles.first
             if let raw = preferred {
@@ -627,12 +634,14 @@ struct MeetingTracker: Sendable {
         case hide
     }
 
-    /// Feed one poll result.
-    mutating func step(detected: DetectedMeeting?) -> Event {
+    /// Feed one poll result. `micInUse`: a call app or browser still holds the microphone
+    /// although no meeting is recognised, e.g. its window is on another Space where
+    /// Accessibility cannot read titles; the banner then keeps its state.
+    mutating func step(detected: DetectedMeeting?, micInUse: Bool = false) -> Event {
         guard let detected else {
             pending = nil
             confirmCount = 0
-            guard active != nil || dismissedInCurrentCall else { return .none }
+            guard active != nil || dismissedInCurrentCall, !micInUse else { return .none }
             missCount += 1
             // A visible banner hides after ~6 s without the meeting; a closed one may only
             // come back after ~30 s, so a short silence or another tab does not bring it back.
@@ -732,7 +741,8 @@ final class MeetingDetector {
         let snapshot = await SystemProbe.capture()
         guard !Task.isCancelled else { return }
         if isSuppressed() { return suppressNow() }
-        switch tracker.step(detected: MeetingMatcher.detect(in: snapshot)) {
+        let micInUse = snapshot.apps.contains(where: \.hasMic)
+        switch tracker.step(detected: MeetingMatcher.detect(in: snapshot), micInUse: micInUse) {
         case .none: break
         case .show(let meeting): onShow?(meeting)
         case .update(let meeting): onUpdate?(meeting)

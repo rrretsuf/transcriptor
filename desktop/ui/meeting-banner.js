@@ -19,7 +19,7 @@ function render(meeting) {
   $("source").textContent = same ? "Meeting detected" : (meeting.source || "Meeting detected");
 }
 
-listen("meeting-banner", ({ payload }) => {
+function apply(payload) {
   const pill = $("pill");
   if (typeof payload.dark === "boolean") {
     platformDark = payload.dark;
@@ -34,7 +34,11 @@ listen("meeting-banner", ({ payload }) => {
   } else if (payload.state === "hide") {
     pill.classList.add("hidden");
   }
-});
+}
+
+listen("meeting-banner", ({ payload }) => apply(payload));
+// A banner shown before this page loaded missed its event.
+invoke("meeting_banner_current").then((payload) => payload && apply(payload));
 
 $("start").addEventListener("click", () => invoke("meeting_banner_start"));
 $("dismiss").addEventListener("click", () => invoke("meeting_banner_dismiss"));

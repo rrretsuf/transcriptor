@@ -329,6 +329,16 @@ struct MeetingDetectorTests {
         #expect(tracker.step(detected: meet) == .show(meet))
     }
 
+    @Test func trackerKeepsStateWhileTheCallWindowIsOnAnotherSpace() {
+        var tracker = MeetingTracker()
+        let meet = DetectedMeeting(id: "google-meet:sync", source: "Google Meet", title: "Sync", isGenericTitle: false, highConfidence: true)
+        #expect(tracker.step(detected: meet) == .show(meet))
+        tracker.dismiss()
+        // Titles unreadable for a minute, microphone still in use: stays closed.
+        for _ in 0..<30 { #expect(tracker.step(detected: nil, micInUse: true) == .none) }
+        #expect(tracker.step(detected: meet) == .none)
+    }
+
     @Test func trackerKeepsSureTitleOverLaterGuess() {
         var tracker = MeetingTracker()
         let meet = DetectedMeeting(id: "google-meet:sync", source: "Google Meet", title: "Sync", isGenericTitle: false, highConfidence: true)

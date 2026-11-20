@@ -22,8 +22,8 @@ sleep 0.5
 
 # The meeting banner's Dismiss is clicked; the other app must keep the keyboard.
 for _ in $(seq 100); do [ -f "$TRANSCRIPTOR_DATA_DIR/selftest-banner" ] && break; sleep 0.2; done
-read -r BX BY < "$TRANSCRIPTOR_DATA_DIR/selftest-banner"
-xdotool mousemove "$BX" "$BY" click 1
+BANNER=($(cat "$TRANSCRIPTOR_DATA_DIR/selftest-banner"))
+xdotool mousemove "${BANNER[0]}" "${BANNER[1]}" click 1
 sleep 0.5
 [ "$(xdotool getactivewindow getwindowname)" = "Target" ] || { echo "FAIL: the meeting banner took the keyboard"; exit 1; }
 touch "$TRANSCRIPTOR_DATA_DIR/selftest-banner-clicked"
