@@ -27,6 +27,18 @@ function Press-Hotkey {
     foreach ($key in $control, $shift, $space) { [Native.Keys]::keybd_event($key, 0, 0, [UIntPtr]::Zero) }
     foreach ($key in $space, $shift, $control) { [Native.Keys]::keybd_event($key, 0, $up, [UIntPtr]::Zero) }
 }
+# For a person after the run: CI uploads screens/ also when a test fails.
+function Save-Screen([string]$Name) {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    New-Item -ItemType Directory -Force "screens" | Out-Null
+    $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($screen.Left, $screen.Top, 0, 0, $bitmap.Size)
+    $bitmap.Save((Join-Path "screens" "windows-$Name.png"))
+    $graphics.Dispose()
+    $bitmap.Dispose()
+}
 function Wait-For([string]$File, [int]$Seconds) {
     for ($i = 0; $i -lt $Seconds * 5 -and -not (Test-Path $File); $i++) { Start-Sleep -Milliseconds 200 }
     if (-not (Test-Path $File)) { throw "$File did not appear in $Seconds s" }
@@ -65,10 +77,12 @@ function End-To-End([bool]$Dictation, [string]$Expect) {
     # The meeting banner's Dismiss is clicked; the other app must keep the keyboard.
     Wait-For (Join-Path $dir "selftest-banner") 20
     $x, $y = (Get-Content (Join-Path $dir "selftest-banner")).Split(" ")
+    Save-Screen "banner-before-click"
     [Native.Keys]::SetCursorPos([int]$x, [int]$y) | Out-Null
     [Native.Keys]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
     [Native.Keys]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 500
+    Save-Screen "banner-after-click"
     $bannerFront = Foreground
     Set-Content (Join-Path $dir "selftest-banner-clicked") "clicked"
     Start-Sleep -Seconds 1
