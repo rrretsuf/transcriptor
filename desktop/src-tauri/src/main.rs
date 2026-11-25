@@ -108,6 +108,12 @@ fn copy(text: String) -> bool {
     paste::write_clipboard(&text)
 }
 
+/// A transcription saved where the user chose in the save dialog.
+#[tauri::command]
+fn save_text(path: String, text: String) -> Result<(), String> {
+    std::fs::write(&path, text).map_err(|e| format!("Could not save {path}: {e}"))
+}
+
 #[tauri::command]
 fn delete_entry(app: AppState, id: String) -> Result<(), String> {
     app.store.lock().unwrap().delete(&id)?;
@@ -297,6 +303,7 @@ fn main() {
             save_key,
             toggle,
             copy,
+            save_text,
             delete_entry,
             finish_onboarding,
             meeting_get,

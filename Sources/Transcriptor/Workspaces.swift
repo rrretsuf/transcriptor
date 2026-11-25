@@ -327,7 +327,7 @@ private struct TranscriptPanel: View {
     }
 }
 
-private struct CopyButton: View {
+struct CopyButton: View {
     let text: String
     @State private var copied = false
     @State private var resetTask: Task<Void, Never>?

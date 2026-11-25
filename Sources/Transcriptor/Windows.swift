@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Config bindings
 
@@ -289,6 +290,7 @@ struct HistoryView: View {
     @ObservedObject var state: AppState
     @State private var query = ""
     @State private var meetingsOnly = false
+    @State private var opened: HistoryEntry?
 
     var body: some View {
         let filtered = filtered // evaluated once per render, not once per branch
@@ -308,7 +310,7 @@ struct HistoryView: View {
                                description: "Check the spelling or try a new search.")
                 } else {
                     List(filtered, id: \.id) { entry in
-                        HistoryRow(entry: entry) { delete(entry) }
+                        HistoryRow(entry: entry, onOpen: { opened = entry }, onDelete: { delete(entry) })
                             .listRowSeparator(.hidden)
                             .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
                     }
@@ -316,6 +318,7 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Transcriptions")
+            .sheet(item: $opened) { TranscriptSheet(entry: $0) }
             .searchable(text: $query, prompt: "Search")
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -357,16 +360,30 @@ private struct TitleLabel: LabelStyle {
     }
 }
 
-/// Click anywhere on the text to copy; the trash appears on hover.
+extension HistoryEntry: Identifiable {
+    /// "Oct 13 · 14:05 – 15:12 · 1,083 words · 4m 43s"
+    var facts: String {
+        let end = Date(timeIntervalSince1970: at / 1000)
+        var parts = [startedAt.map { meetingSpan(Date(timeIntervalSince1970: $0 / 1000), end) }
+            ?? end.formatted(.dateTime.month().day().hour().minute())]
+        if let app { parts.append(app) }
+        if let words { parts.append("\(words) words") }
+        if let durationMs {
+            parts.append(Duration.seconds(durationMs / 1000).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow)))
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// Click to read it in full; the copy button sits beside it, the trash appears on hover.
 private struct HistoryRow: View {
     let entry: HistoryEntry
+    let onOpen: () -> Void
     let onDelete: () -> Void
     @State private var hovering = false
-    @State private var copied = false
-    @State private var copiedTask: Task<Void, Never>?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
                 if let title = entry.title {
                     Label(title, systemImage: entry.isMeeting ? "record.circle" : "doc")
@@ -377,31 +394,16 @@ private struct HistoryRow: View {
                     .lineLimit(entry.title != nil ? 3 : 4)
                     .foregroundStyle(entry.title != nil ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 6) {
-                    if let start = entry.startedAt {
-                        Text(meetingSpan(Date(timeIntervalSince1970: start / 1000), Date(timeIntervalSince1970: entry.at / 1000)))
-                    } else {
-                        Text(Date(timeIntervalSince1970: entry.at / 1000), format: .dateTime.month().day().hour().minute())
-                    }
-                    if let app = entry.app { Text("·"); Text(app) }
-                    if let words = entry.words { Text("·"); Text("\(words) words") }
-                    if let ms = entry.durationMs {
-                        Text("·")
-                        Text(Duration.seconds(ms / 1000), format: .units(allowed: [.minutes, .seconds], width: .narrow))
-                    }
-                    if copied {
-                        Label("Copied", systemImage: "checkmark")
-                            .foregroundStyle(Color.accentColor)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text(entry.facts)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
+            CopyIconButton(text: entry.text)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 12, weight: .medium))
-                    .frame(width: 26, height: 26)
+                    .frame(width: 28, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -412,26 +414,156 @@ private struct HistoryRow: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(copied ? Color.accentColor.opacity(0.14) : hovering ? Color.primary.opacity(0.05) : .clear)
+                .fill(hovering ? Color.primary.opacity(0.05) : .clear)
         )
         .contentShape(Rectangle())
-        .onTapGesture(perform: copy)
+        .onTapGesture(perform: onOpen)
         .onHover { hovering = $0 }
-        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: copied)
         .animation(.easeOut(duration: 0.15), value: hovering)
         .swipeActions(edge: .trailing) {
             Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
         }
     }
+}
 
-    private func copy() {
-        _ = Paste.writeClipboard(entry.text)
-        copied = true
-        copiedTask?.cancel()
-        copiedTask = Task {
-            try? await Task.sleep(for: .seconds(1.2))
-            guard !Task.isCancelled else { return }
-            copied = false
+/// A square copy button whose icon turns into a check for a moment.
+private struct CopyIconButton: View {
+    let text: String
+    @State private var copied = false
+    @State private var resetTask: Task<Void, Never>?
+
+    var body: some View {
+        Button {
+            _ = Paste.writeClipboard(text)
+            copied = true
+            resetTask?.cancel()
+            resetTask = Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                guard !Task.isCancelled else { return }
+                copied = false
+            }
+        } label: {
+            ZStack {
+                Image(systemName: "doc.on.doc")
+                    .opacity(copied ? 0 : 1).scaleEffect(copied ? 0.25 : 1).blur(radius: copied ? 4 : 0)
+                Image(systemName: "checkmark").fontWeight(.semibold)
+                    .opacity(copied ? 1 : 0).scaleEffect(copied ? 1 : 0.25).blur(radius: copied ? 0 : 4)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .frame(width: 32, height: 32)
+            .foregroundStyle(copied ? Color.accentColor : .secondary)
+            .background(.quaternary.opacity(copied ? 0 : 0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Color.accentColor.opacity(copied ? 0.15 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressScale())
+        .help("Copy")
+        .animation(.spring(duration: 0.3, bounce: 0), value: copied)
+    }
+}
+
+private struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// One transcription in full: speakers labelled, selectable, copied or saved as text.
+private struct TranscriptSheet: View {
+    let entry: HistoryEntry
+    @Environment(\.dismiss) private var dismiss
+    @State private var saved = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.title ?? entry.app.map { "Dictation in \($0)" } ?? "Dictation")
+                        .font(.title3.weight(.semibold))
+                    Text(entry.facts).font(.callout).monospacedDigit().foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .keyboardShortcut(.cancelAction)
+                .help("Close")
+            }
+            ScrollView {
+                Text(formatted)
+                    .textSelection(.enabled)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+            }
+            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            HStack {
+                Text("\(entry.text.split(whereSeparator: \.isWhitespace).count) words")
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(saved ? "Saved" : "Save as…", action: save)
+                    .glassButton()
+                    .keyboardShortcut("s")
+                CopyButton(text: entry.text)
+            }
+            .controlSize(.large)
+        }
+        .padding(20)
+        .frame(minWidth: 520, idealWidth: 680, minHeight: 420, idealHeight: 640)
+    }
+
+    private static let speakerColors: [Color] = [.accentColor, .green, .orange, .purple, .secondary]
+
+    /// In a meeting, "Speaker 1: Hello" paragraphs get the speaker as a coloured label, once per turn.
+    private var formatted: AttributedString {
+        var result = AttributedString()
+        var speakers: [String] = []
+        var last: String?
+        let paragraphs = entry.text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n\n")
+        for (index, paragraph) in paragraphs.enumerated() where !paragraph.isEmpty {
+            let turn = entry.isMeeting ? paragraph.range(of: #"^[^\n:]{1,32}:\s+"#, options: .regularExpression) : nil
+            let speaker = turn.map { paragraph[$0].trimmingCharacters(in: .whitespaces).dropLast() }.map(String.init)
+            let said = turn.map { String(paragraph[$0.upperBound...]) } ?? paragraph
+            if index > 0 { result += AttributedString(speaker != nil && speaker != last ? "\n\n\n" : "\n\n") }
+            if let speaker, speaker != last {
+                if !speakers.contains(speaker) { speakers.append(speaker) }
+                var label = AttributedString(speaker + "\n")
+                label.font = .callout.weight(.semibold)
+                label.foregroundColor = Self.speakerColors[speakers.firstIndex(of: speaker)! % Self.speakerColors.count]
+                result += label
+            }
+            var body = AttributedString(said)
+            body.font = .body
+            result += body
+            last = speaker
+        }
+        return result
+    }
+
+    private func save() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = (entry.title ?? "Transcription \(Date(timeIntervalSince1970: entry.at / 1000).formatted(date: .abbreviated, time: .shortened))")
+            .replacingOccurrences(of: "[/:\\n]", with: "-", options: .regularExpression) + ".txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let header = [entry.title, entry.facts].compactMap { $0 }.joined(separator: "\n")
+        do {
+            try "\(header)\n\n\(entry.text.trimmingCharacters(in: .whitespacesAndNewlines))\n".write(to: url, atomically: true, encoding: .utf8)
+            saved = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                saved = false
+            }
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 }

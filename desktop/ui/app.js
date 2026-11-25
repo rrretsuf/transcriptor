@@ -174,6 +174,30 @@ function element(tag, className, text) {
 
 const icon = (name) => `<svg><use href="#i-${name}" /></svg>`;
 
+function facts(entry) {
+  const facts = [entry.startedAt ? span(entry.startedAt, entry.at) : dateTime.format(entry.at)];
+  if (entry.app) facts.push(entry.app);
+  if (entry.words != null) facts.push(`${entry.words} words`);
+  if (entry.durationMs != null) facts.push(duration(entry.durationMs));
+  return facts.join(" · ");
+}
+
+/** The copy icon turns into a check for a moment. */
+function copyButton(text) {
+  const button = element("button", "icon-copy");
+  button.title = "Copy";
+  button.innerHTML = icon("copy") + icon("check");
+  let timer;
+  button.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    await invoke("copy", { text });
+    button.classList.add("done");
+    clearTimeout(timer);
+    timer = setTimeout(() => button.classList.remove("done"), 1400);
+  });
+  return button;
+}
+
 function entryRow(entry) {
   const row = element("div", "entry");
   const body = element("div", "body");
@@ -183,13 +207,7 @@ function entryRow(entry) {
     name.append(element("span", "", entry.title));
     body.append(name);
   }
-  body.append(element("div", "text", entry.text));
-  const facts = [entry.startedAt ? span(entry.startedAt, entry.at) : dateTime.format(entry.at)];
-  if (entry.app) facts.push(entry.app);
-  if (entry.words != null) facts.push(`${entry.words} words`);
-  if (entry.durationMs != null) facts.push(duration(entry.durationMs));
-  const meta = element("div", "meta", facts.join(" · "));
-  body.append(meta);
+  body.append(element("div", "text", entry.text), element("div", "meta", facts(entry)));
   const remove = element("button", "delete");
   remove.title = "Delete";
   remove.innerHTML = icon("trash");
@@ -198,18 +216,100 @@ function entryRow(entry) {
     await invoke("delete_entry", { id: entry.id });
     await loadHistory();
   });
-  row.append(body, remove);
-  row.addEventListener("click", async () => {
-    if (getSelection().toString()) return;
-    await invoke("copy", { text: entry.text });
-    row.classList.add("copied");
-    meta.innerHTML = "<b>Copied</b>";
-    setTimeout(() => {
-      row.classList.remove("copied");
-      meta.textContent = facts.join(" · ");
-    }, 1200);
+  row.append(body, copyButton(entry.text), remove);
+  row.addEventListener("click", () => {
+    if (!getSelection().toString()) openViewer(entry);
   });
   return row;
+}
+
+/* --------------------------------- viewer ---------------------------------- */
+
+let viewing;
+
+/** In a meeting, "Speaker 1: Hello" paragraphs get the speaker as a label, said once per turn. */
+function transcriptNodes(text, meeting) {
+  const speakers = [];
+  let last;
+  return text.trim().split(/\n\s*\n/).map((paragraph) => {
+    const turn = meeting && paragraph.match(/^([^\n:]{1,32}):\s+([\s\S]*)$/);
+    const node = element("p");
+    if (!turn) {
+      last = undefined;
+      node.textContent = paragraph;
+      return node;
+    }
+    const [, speaker, said] = turn;
+    if (!speakers.includes(speaker)) speakers.push(speaker);
+    if (speaker !== last) {
+      const label = element("b", "", speaker);
+      label.dataset.speaker = speakers.indexOf(speaker) % 5;
+      node.append(label);
+      node.classList.add("turn");
+    }
+    node.append(element("span", "", said));
+    last = speaker;
+    return node;
+  });
+}
+
+const fileName = (entry) => {
+  const name = entry.title || `Transcription ${dateTime.format(entry.at)}`;
+  return name.replace(/[\\/:*?"<>|\n]+/g, "-").trim();
+};
+
+function openViewer(entry) {
+  viewing = entry;
+  $("viewer-title").textContent = entry.title || (entry.app ? `Dictation in ${entry.app}` : "Dictation");
+  $("viewer-meta").textContent = facts(entry);
+  const text = $("viewer-text");
+  text.replaceChildren(...transcriptNodes(entry.text, entry.kind === "meeting"));
+  text.scrollTop = 0;
+  $("viewer").showModal();
+  text.focus();
+}
+
+async function saveViewing() {
+  const entry = viewing;
+  const path = await window.__TAURI__.dialog.save({
+    defaultPath: `${fileName(entry)}.txt`,
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  });
+  if (!path) return;
+  const header = [entry.title, facts(entry)].filter(Boolean).join("\n");
+  try {
+    await invoke("save_text", { path, text: `${header}\n\n${entry.text.trim()}\n` });
+    flash($("viewer-save"), "Saved", "Save as…");
+  } catch (message) {
+    flash($("viewer-save"), "Could not save", "Save as…");
+    banner(message);
+  }
+}
+
+function flash(button, done, label) {
+  button.textContent = done;
+  clearTimeout(button.timer);
+  button.timer = setTimeout(() => { button.textContent = label; }, 1400);
+}
+
+function setUpViewer() {
+  const viewer = $("viewer");
+  viewer.addEventListener("click", (event) => { if (event.target === viewer) viewer.close(); });
+  viewer.querySelector("[data-close]").addEventListener("click", () => viewer.close());
+  $("viewer-save").addEventListener("click", saveViewing);
+  $("viewer-copy").addEventListener("click", async () => {
+    await invoke("copy", { text: viewing.text });
+    flash($("viewer-copy"), "Copied", "Copy");
+  });
+  addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+    event.preventDefault();
+    if (viewer.open) saveViewing();
+  });
+  // The webview's own menu offers Back, Reload and "Save as" a web page; text fields keep theirs.
+  addEventListener("contextmenu", (event) => {
+    if (!event.target.closest("input, textarea, .selectable")) event.preventDefault();
+  });
 }
 
 function renderHistory() {
@@ -488,6 +588,7 @@ async function start() {
   renderHotkeys.push(hotkeyRecorder($("settings-hotkey")), hotkeyRecorder($("onboarding-hotkey")));
   setUpOnboarding();
   setUpHistory();
+  setUpViewer();
   setUpMeeting();
   setUpFile();
   setUpSettings();
@@ -501,8 +602,7 @@ async function start() {
   all("[data-url]").forEach((link) => link.addEventListener("click", () => window.__TAURI__.opener.openUrl(link.dataset.url)));
   all("[data-copy]").forEach((button) => button.addEventListener("click", async () => {
     await invoke("copy", { text: $(button.dataset.copy).textContent });
-    button.textContent = "Copied";
-    setTimeout(() => { button.textContent = "Copy"; }, 1400);
+    flash(button, "Copied", "Copy");
   }));
   listen("navigate", (event) => navigate(event.payload));
   listen("history", loadHistory);
